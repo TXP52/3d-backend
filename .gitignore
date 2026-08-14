@@ -1,0 +1,9 @@
+target/
+data/
+# Chua mat khau database - khong duoc commit
+src/main/resources/application-supabase.properties
+*.log
+.idea/
+*.iml
+.vscode/
+.DS_Store
