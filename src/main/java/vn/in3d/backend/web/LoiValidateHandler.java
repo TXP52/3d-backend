@@ -24,6 +24,13 @@ public class LoiValidateHandler {
         return Map.of("loi", thongBao);
     }
 
+    /** Tomcat chặn file quá cỡ TRƯỚC khi vào controller — trả JSON tiếng Việt thay vì trang lỗi HTML. */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+    public Map<String, String> xuLyAnhQuaNang(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        return Map.of("loi", "Ảnh nặng quá 5MB. Hãy chọn ảnh nhỏ hơn hoặc nén lại rồi tải lên.");
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, String>> xuLyLoiCoChu(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode())

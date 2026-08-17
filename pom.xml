@@ -42,6 +42,11 @@
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
+        <!-- Gui email OTP qua Gmail SMTP -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
         <!-- H2: database nhung de chay thu local (profile mac dinh) -->
         <dependency>
             <groupId>com.h2database</groupId>

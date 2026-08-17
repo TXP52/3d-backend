@@ -30,10 +30,22 @@ public class XacThucController {
         return xacThuc.dangKy(body.get("hoTen"), body.get("email"), body.get("matKhau"));
     }
 
-    /** Đăng nhập: trả về token (hạn 7 ngày) + thông tin người dùng. */
+    /** Đăng nhập cho KHÁCH (website bán hàng): trả token luôn, không cần OTP. */
     @PostMapping("/auth/dang-nhap")
     public Map<String, Object> dangNhap(@RequestBody Map<String, String> body) {
         return xacThuc.dangNhap(body.get("email"), body.get("matKhau"));
+    }
+
+    /** BƯỚC 1 đăng nhập QUẢN TRỊ: đúng email + mật khẩu + là admin -> gửi OTP qua email. */
+    @PostMapping("/auth/admin/dang-nhap")
+    public Map<String, Object> dangNhapAdmin(@RequestBody Map<String, String> body) {
+        return xacThuc.guiOtpDangNhapAdmin(body.get("email"), body.get("matKhau"));
+    }
+
+    /** BƯỚC 2 đăng nhập QUẢN TRỊ: nhập đúng mã OTP -> nhận token. */
+    @PostMapping("/auth/admin/xac-thuc-otp")
+    public Map<String, Object> xacThucOtp(@RequestBody Map<String, String> body) {
+        return xacThuc.xacThucOtp(body.get("email"), body.get("ma"));
     }
 
     /** Thông tin người dùng của token hiện tại (header: Authorization: Bearer <token>). */

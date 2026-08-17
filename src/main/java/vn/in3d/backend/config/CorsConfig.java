@@ -17,5 +17,9 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOrigins("*")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*");
+        // Ảnh sản phẩm phục vụ từ ổ đĩa — cho phép trang bán hàng/quản trị hiển thị
+        registry.addMapping("/anh/**")
+                .allowedOrigins("*")
+                .allowedMethods("GET", "OPTIONS");
     }
 }

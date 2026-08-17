@@ -36,6 +36,15 @@ public class SanPham {
     @Column(name = "dang_ban", nullable = false)
     private Boolean dangBan = true;
 
+    /**
+     * Trạng thái sản phẩm trong quy trình in:
+     * du_kien | da_dat | dang_in | san_hang | thanh_cong | hoan_hang | dang_van_chuyen | het_hang
+     */
+    // columnDefinition có DEFAULT để thêm cột vào bảng đã có dữ liệu không bị lỗi NOT NULL
+    @Column(name = "trang_thai", nullable = false,
+            columnDefinition = "varchar(40) default 'san_hang' not null")
+    private String trangThai = "san_hang";
+
     @Column(name = "created_at")
     private OffsetDateTime createdAt;
 
@@ -72,6 +81,8 @@ public class SanPham {
     public void setTonKho(Integer tonKho) { this.tonKho = tonKho; }
     public Boolean getDangBan() { return dangBan; }
     public void setDangBan(Boolean dangBan) { this.dangBan = dangBan; }
+    public String getTrangThai() { return trangThai; }
+    public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
     public OffsetDateTime getCreatedAt() { return createdAt; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

@@ -25,19 +25,55 @@ Backend chạy tại **http://localhost:8090** (tránh 8080 vì Apache/XAMPP th�
 
 | Method | Đường dẫn | Chức năng |
 |---|---|---|
-| POST | `/api/auth/dang-ky` | Đăng ký tài khoản (BCrypt, lưu bảng `nguoi_dung`; **người đầu tiên = admin**) |
-| POST | `/api/auth/dang-nhap` | Đăng nhập, trả token HMAC hạn 7 ngày + thông tin người dùng |
+| POST | `/api/auth/dang-ky` | Đăng ký tài khoản khách (BCrypt, bảng `nguoi_dung`) |
+| POST | `/api/auth/dang-nhap` | Đăng nhập KHÁCH (website bán hàng) — trả token luôn |
+| POST | `/api/auth/admin/dang-nhap` | **Bước 1 admin**: đúng email+mật khẩu và là admin → gửi OTP 6 số qua email |
+| POST | `/api/auth/admin/xac-thuc-otp` | **Bước 2 admin**: đúng OTP → trả token (mã dùng 1 lần, hạn 5 phút, sai tối đa 5 lần) |
 | GET | `/api/auth/toi` | Thông tin người dùng của token (`Authorization: Bearer <token>`) |
 | GET | `/api/nguoi-dung` | Danh sách tài khoản — chỉ token admin |
+| GET/POST/PUT/DELETE | `/api/vat-tu` | Kho vật tư (máy in, cuộn nhựa): giá, số lượng, gram, đã dùng |
+| PUT | `/api/vat-tu/{id}/dung-them` | Ghi nhận vừa in tốn thêm N gram (`{"gram": 5}`) |
+| GET/POST/PUT/DELETE | `/api/nha-cung-cap` | Nhà cung cấp (nơi mua vật tư) |
 | GET | `/api/suc-khoe` | Kiểm tra backend sống (frontend dùng để tự chọn Java hay Supabase) |
 | GET | `/api/san-pham` | Danh sách sản phẩm đang bán (`?tatCa=true`: cả sản phẩm ẩn, cho admin) |
 | POST | `/api/san-pham` | Thêm sản phẩm (admin) |
-| PUT | `/api/san-pham/{id}` | Sửa giá / tồn kho / ẩn-hiện (body: `{"gia":..,"tonKho":..,"dangBan":..}`) |
+| PUT | `/api/san-pham/{id}` | Sửa tên / mô tả / ảnh / giá / tồn kho / ẩn-hiện / trạng thái |
+| DELETE | `/api/san-pham/{id}` | Xoá hẳn sản phẩm (admin) |
+| POST | `/api/anh` | **Tải ảnh lên** (multipart `file`) → trả `{ten, duongDan, url}`; lưu ở `./data/anh` |
+| DELETE | `/api/anh/{ten}` | Xoá 1 file ảnh khỏi ổ đĩa |
+| GET | `/anh/{ten}` | Xem ảnh đã tải (phục vụ tĩnh, cache 30 ngày) |
 | POST | `/api/don-hang` | Khách đặt hàng (validate tiếng Việt, tự tạo mã đơn + bản ghi thanh toán COD) |
 | GET | `/api/don-hang` | Danh sách đơn kèm chi tiết + thanh toán, mới nhất trước |
 | PUT | `/api/don-hang/{id}/trang-thai` | Đổi trạng thái (body: `{"trangThai":"dang_giao"}`) |
 | PUT | `/api/don-hang/{id}/da-thanh-toan` | Đánh dấu đã thanh toán |
 | DELETE | `/api/don-hang/{id}` | Xoá đơn |
+
+### Trạng thái
+
+`san_pham.trang_thai` (theo quy trình in 3D):
+`du_kien` · `da_dat` · `dang_in` · `san_hang` · `dang_van_chuyen` · `thanh_cong` · `hoan_hang` · `het_hang`
+
+`vat_tu.trang_thai` (theo quy trình mua vật tư):
+`da_dat` · `dang_van_chuyen` · `thanh_cong` · `het_hang`
+
+Gửi trạng thái ngoài danh sách trên → HTTP 400 kèm thông báo tiếng Việt.
+
+### Lưu ảnh
+
+Ảnh ghi thẳng xuống ổ đĩa (`in3d.thu-muc-anh`, mặc định `./data/anh`), tên file là UUID, tối đa 5MB,
+chỉ nhận `jpg/jpeg/png/webp/gif`. Trình duyệt đã nén ảnh còn ≤1200px WebP trước khi gửi.
+
+- **DB lưu `duongDan` tương đối** (`/anh/xxx.webp`) — đổi host/tên miền không chết link ảnh cũ.
+- Kiểm tra **magic bytes** đầu file: đổi đuôi file rác thành `.jpg` sẽ bị từ chối HTTP 415.
+- Quá 5MB → HTTP 413 kèm JSON tiếng Việt (`MaxUploadSizeExceededException` được bắt riêng).
+- `/anh/**` trả `X-Content-Type-Options: nosniff` và cache 1 năm `immutable`.
+- ⚠️ Endpoint tải ảnh **chưa có xác thực** (giống các API admin khác) — phải bổ sung trước khi mở ra Internet.
+
+So sánh các cách lưu ảnh miễn phí và cách chuyển sang Supabase Storage khi deploy: xem [HUONG-DAN-LUU-ANH.md](HUONG-DAN-LUU-ANH.md).
+
+```bash
+curl -X POST http://localhost:8090/api/anh -F "file=@anh-san-pham.jpg"
+```
 
 Ví dụ đặt hàng:
 
@@ -93,10 +129,11 @@ Entity Java ánh xạ **đúng tên bảng/cột** của schema Supabase (`don_h
 ```
 src/main/java/vn/in3d/backend/
 ├── In3dBackendApplication.java   # điểm khởi động
-├── config/   CorsConfig, DataSeeder (nạp 10 sản phẩm mẫu khi H2 trống)
-├── entity/   SanPham, DonHang, DonHangChiTiet, ThanhToan (ánh xạ schema Supabase)
-├── repository/  SanPhamRepository, DonHangRepository (Spring Data JPA)
+├── config/   CorsConfig, TaiNguyenAnhConfig (phục vụ /anh/**), DataSeeder, KiemTraKetNoiSupabase
+├── entity/   SanPham, DonHang, DonHangChiTiet, ThanhToan, VatTu, NhaCungCap, NguoiDung, MaOtp
+├── repository/  Spring Data JPA cho từng entity
 ├── dto/      DatHangRequest (validate tiếng Việt)
-├── service/  DonHangService (nghiệp vụ: tạo đơn, đổi trạng thái, thanh toán)
-└── web/      SanPhamController, DonHangController, LoiValidateHandler
+├── service/  DonHangService, XacThucService (OTP), EmailService (Gmail SMTP)
+└── web/      SanPhamController, DonHangController, VatTuController, XacThucController,
+              AnhController (tải ảnh), LoiValidateHandler
 ```
