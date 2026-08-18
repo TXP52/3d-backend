@@ -1,14 +1,13 @@
 package vn.in3d.backend.entity;
 
 import jakarta.persistence.*;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Đơn hàng — ánh xạ bảng public.don_hang (trùng schema Supabase). */
 @Entity
 @Table(name = "don_hang")
-public class DonHang {
+public class DonHang extends BanGhi {
 
     /** Các trạng thái đơn hợp lệ (trùng ràng buộc CHECK trong schema.sql). */
     public static final List<String> TRANG_THAI_HOP_LE =
@@ -39,28 +38,11 @@ public class DonHang {
     @Column(name = "trang_thai", nullable = false)
     private String trangThai = "cho_xac_nhan";
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @Column(name = "updated_at")
-    private OffsetDateTime updatedAt;
-
     @OneToMany(mappedBy = "donHang", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<DonHangChiTiet> chiTiet = new ArrayList<>();
 
     @OneToMany(mappedBy = "donHang", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ThanhToan> thanhToan = new ArrayList<>();
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-        updatedAt = OffsetDateTime.now();
-    }
-
-    @PreUpdate
-    void truocKhiCapNhat() {
-        updatedAt = OffsetDateTime.now();
-    }
 
     public void themChiTiet(DonHangChiTiet ct) {
         ct.setDonHang(this);
@@ -89,8 +71,6 @@ public class DonHang {
     public void setTongTien(Long tongTien) { this.tongTien = tongTien; }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
-    public OffsetDateTime getUpdatedAt() { return updatedAt; }
     public List<DonHangChiTiet> getChiTiet() { return chiTiet; }
     public List<ThanhToan> getThanhToan() { return thanhToan; }
 }

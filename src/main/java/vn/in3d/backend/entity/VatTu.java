@@ -1,7 +1,6 @@
 package vn.in3d.backend.entity;
 
 import jakarta.persistence.*;
-import java.time.OffsetDateTime;
 
 /**
  * Vật tư trong kho: máy in, cuộn nhựa, phụ kiện...
@@ -9,7 +8,7 @@ import java.time.OffsetDateTime;
  */
 @Entity
 @Table(name = "vat_tu")
-public class VatTu {
+public class VatTu extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,8 +21,12 @@ public class VatTu {
     @Column(nullable = false)
     private String loai = "khac";
 
-    /** Màu nhựa: Đỏ, Vàng, Đen, Trắng, Be, Xám... */
+    /** Tên màu hiển thị (giữ lại để dữ liệu cũ không mất) */
     private String mau;
+
+    /** Trỏ sang bảng mau_sac — nguồn màu chuẩn, có kèm mã màu để vẽ ô màu */
+    @Column(name = "mau_sac_id")
+    private Long mauSacId;
 
     /** Giá mua 1 đơn vị (VNĐ) */
     @Column(nullable = false)
@@ -59,14 +62,6 @@ public class VatTu {
     @Column(name = "ghi_chu", columnDefinition = "text")
     private String ghiChu;
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-    }
-
     /** Tổng tiền đã bỏ ra mua vật tư này = giá × số lượng. */
     @Transient
     public long getTongTienMua() {
@@ -101,6 +96,8 @@ public class VatTu {
     public void setLoai(String loai) { this.loai = loai; }
     public String getMau() { return mau; }
     public void setMau(String mau) { this.mau = mau; }
+    public Long getMauSacId() { return mauSacId; }
+    public void setMauSacId(Long mauSacId) { this.mauSacId = mauSacId; }
     public Long getGia() { return gia; }
     public void setGia(Long gia) { this.gia = gia; }
     public Integer getSoLuong() { return soLuong; }
@@ -117,5 +114,4 @@ public class VatTu {
     public void setNhaCungCapId(Long nhaCungCapId) { this.nhaCungCapId = nhaCungCapId; }
     public String getGhiChu() { return ghiChu; }
     public void setGhiChu(String ghiChu) { this.ghiChu = ghiChu; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

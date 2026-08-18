@@ -34,11 +34,14 @@ Backend chạy tại **http://localhost:8090** (tránh 8080 vì Apache/XAMPP th�
 | GET/POST/PUT/DELETE | `/api/vat-tu` | Kho vật tư (máy in, cuộn nhựa): giá, số lượng, gram, đã dùng |
 | PUT | `/api/vat-tu/{id}/dung-them` | Ghi nhận vừa in tốn thêm N gram (`{"gram": 5}`) |
 | GET/POST/PUT/DELETE | `/api/nha-cung-cap` | Nhà cung cấp (nơi mua vật tư) |
+| GET/POST/PUT/DELETE | `/api/mau-sac` | Bảng màu (tên + mã màu hex) dùng cho nhựa và sản phẩm |
+| PUT | `/api/san-pham/{id}/khoi-phuc` | Khôi phục bản ghi đã xoá mềm |
+| GET | `/api/san-pham/thung-rac` | Danh sách sản phẩm đã xoá mềm |
 | GET | `/api/suc-khoe` | Kiểm tra backend sống (frontend dùng để tự chọn Java hay Supabase) |
 | GET | `/api/san-pham` | Danh sách sản phẩm đang bán (`?tatCa=true`: cả sản phẩm ẩn, cho admin) |
 | POST | `/api/san-pham` | Thêm sản phẩm (admin) |
 | PUT | `/api/san-pham/{id}` | Sửa tên / mô tả / ảnh / giá / tồn kho / ẩn-hiện / trạng thái |
-| DELETE | `/api/san-pham/{id}` | Xoá hẳn sản phẩm (admin) |
+| DELETE | `/api/san-pham/{id}` | **Xoá mềm** sản phẩm (bật `is_deleted`, không xoá khỏi DB) |
 | POST | `/api/anh` | **Tải ảnh lên** (multipart `file`) → trả `{ten, duongDan, url}`; lưu ở `./data/anh` |
 | DELETE | `/api/anh/{ten}` | Xoá 1 file ảnh khỏi ổ đĩa |
 | GET | `/anh/{ten}` | Xem ảnh đã tải (phục vụ tĩnh, cache 30 ngày) |
@@ -46,7 +49,7 @@ Backend chạy tại **http://localhost:8090** (tránh 8080 vì Apache/XAMPP th�
 | GET | `/api/don-hang` | Danh sách đơn kèm chi tiết + thanh toán, mới nhất trước |
 | PUT | `/api/don-hang/{id}/trang-thai` | Đổi trạng thái (body: `{"trangThai":"dang_giao"}`) |
 | PUT | `/api/don-hang/{id}/da-thanh-toan` | Đánh dấu đã thanh toán |
-| DELETE | `/api/don-hang/{id}` | Xoá đơn |
+| DELETE | `/api/don-hang/{id}` | **Xoá mềm** đơn hàng |
 
 ### Trạng thái
 
@@ -57,6 +60,25 @@ Backend chạy tại **http://localhost:8090** (tránh 8080 vì Apache/XAMPP th�
 `da_dat` · `dang_van_chuyen` · `thanh_cong` · `het_hang`
 
 Gửi trạng thái ngoài danh sách trên → HTTP 400 kèm thông báo tiếng Việt.
+
+### Xoá mềm
+
+**Toàn hệ thống không xoá cứng.** Mọi bảng kế thừa lớp `entity/BanGhi.java` nên đều có:
+
+| Cột | Ý nghĩa |
+|---|---|
+| `created_at` | Lúc tạo, không đổi |
+| `updated_at` | Tự cập nhật mỗi lần sửa |
+| `is_deleted` | `true` = đã xoá (ẩn khỏi mọi danh sách), dữ liệu vẫn còn nguyên |
+
+Gọi `DELETE` chỉ bật cờ `is_deleted`. Mọi API danh sách đều lọc `is_deleted = false`.
+Nhờ vậy lỡ tay xoá vẫn khôi phục được, và đơn hàng cũ vẫn tra ngược được sản phẩm đã ngừng bán.
+
+### Đồng bộ Supabase
+
+Backend chạy H2 thì Hibernate tự tạo bảng. Muốn Supabase có đúng schema này
+(kể cả `vat_tu`, `nha_cung_cap`, `mau_sac`, `ma_otp` — hiện Supabase còn thiếu),
+chạy `SUPABASE-DONG-BO.sql` trong Supabase SQL Editor.
 
 ### Lưu ảnh
 

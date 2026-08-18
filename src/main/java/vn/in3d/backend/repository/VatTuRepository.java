@@ -7,4 +7,6 @@ import java.util.List;
 
 public interface VatTuRepository extends JpaRepository<VatTu, Long> {
     List<VatTu> findAllByOrderByLoaiAscIdAsc();
+
+    List<VatTu> findByDaXoaFalseOrderByLoaiAscIdAsc();
 }

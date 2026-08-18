@@ -184,7 +184,7 @@ public class XacThucService {
     }
 
     public List<NguoiDung> danhSachNguoiDung() {
-        return nguoiDungRepo.findAll();
+        return nguoiDungRepo.findByDaXoaFalseOrderByIdAsc();
     }
 
     private String phatToken(NguoiDung nd) {

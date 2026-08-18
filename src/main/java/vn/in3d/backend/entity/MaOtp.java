@@ -6,7 +6,7 @@ import java.time.OffsetDateTime;
 /** Mã OTP gửi qua email khi đăng nhập trang quản trị. */
 @Entity
 @Table(name = "ma_otp")
-public class MaOtp {
+public class MaOtp extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -28,14 +28,6 @@ public class MaOtp {
     @Column(name = "so_lan_sai", nullable = false)
     private Integer soLanSai = 0;
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-    }
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getEmail() { return email; }
@@ -48,5 +40,4 @@ public class MaOtp {
     public void setDaDung(Boolean daDung) { this.daDung = daDung; }
     public Integer getSoLanSai() { return soLanSai; }
     public void setSoLanSai(Integer soLanSai) { this.soLanSai = soLanSai; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

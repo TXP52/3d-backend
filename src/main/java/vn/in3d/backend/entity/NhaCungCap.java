@@ -1,12 +1,11 @@
 package vn.in3d.backend.entity;
 
 import jakarta.persistence.*;
-import java.time.OffsetDateTime;
 
 /** Nhà cung cấp / nơi mua vật tư (Shopee, Lazada, cửa hàng...). */
 @Entity
 @Table(name = "nha_cung_cap")
-public class NhaCungCap {
+public class NhaCungCap extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -22,14 +21,6 @@ public class NhaCungCap {
     @Column(name = "ghi_chu", columnDefinition = "text")
     private String ghiChu;
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-    }
-
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getTen() { return ten; }
@@ -38,5 +29,4 @@ public class NhaCungCap {
     public void setLienHe(String lienHe) { this.lienHe = lienHe; }
     public String getGhiChu() { return ghiChu; }
     public void setGhiChu(String ghiChu) { this.ghiChu = ghiChu; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

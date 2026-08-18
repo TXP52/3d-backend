@@ -7,7 +7,7 @@ import java.time.OffsetDateTime;
 /** Thanh toán — ánh xạ bảng public.thanh_toan (trùng schema Supabase). */
 @Entity
 @Table(name = "thanh_toan")
-public class ThanhToan {
+public class ThanhToan extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -35,14 +35,6 @@ public class ThanhToan {
     @Column(name = "thanh_toan_luc")
     private OffsetDateTime thanhToanLuc;
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-    }
-
     // Getter / Setter
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -58,5 +50,4 @@ public class ThanhToan {
     public void setMaGiaoDich(String maGiaoDich) { this.maGiaoDich = maGiaoDich; }
     public OffsetDateTime getThanhToanLuc() { return thanhToanLuc; }
     public void setThanhToanLuc(OffsetDateTime thanhToanLuc) { this.thanhToanLuc = thanhToanLuc; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

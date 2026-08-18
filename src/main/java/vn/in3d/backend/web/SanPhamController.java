@@ -35,7 +35,8 @@ public class SanPhamController {
     /** Danh sách sản phẩm. Mặc định chỉ trả sản phẩm đang bán; ?tatCa=true trả hết (cho admin). */
     @GetMapping("/san-pham")
     public List<SanPham> danhSach(@RequestParam(defaultValue = "false") boolean tatCa) {
-        return tatCa ? sanPhamRepo.findAll() : sanPhamRepo.findByDangBanTrueOrderByIdAsc();
+        return tatCa ? sanPhamRepo.findByDaXoaFalseOrderByIdAsc()
+                     : sanPhamRepo.findByDangBanTrueAndDaXoaFalseOrderByIdAsc();
     }
 
     /** Thêm sản phẩm mới (admin). */
@@ -81,14 +82,29 @@ public class SanPhamController {
         return sanPhamRepo.save(sp);
     }
 
-    /** Xoá hẳn sản phẩm (admin). */
+    /** XOÁ MỀM sản phẩm: chỉ bật cờ is_deleted, dữ liệu vẫn nằm trong database. */
     @DeleteMapping("/san-pham/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void xoa(@PathVariable Long id) {
-        if (!sanPhamRepo.existsById(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm.");
-        }
-        sanPhamRepo.deleteById(id);
+        SanPham sp = sanPhamRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm."));
+        sp.xoaMem();
+        sanPhamRepo.save(sp);
+    }
+
+    /** Khôi phục sản phẩm đã xoá. */
+    @PutMapping("/san-pham/{id}/khoi-phuc")
+    public SanPham khoiPhuc(@PathVariable Long id) {
+        SanPham sp = sanPhamRepo.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm."));
+        sp.khoiPhuc();
+        return sanPhamRepo.save(sp);
+    }
+
+    /** Danh sách sản phẩm đã xoá — để xem lại hoặc khôi phục. */
+    @GetMapping("/san-pham/thung-rac")
+    public List<SanPham> thungRac() {
+        return sanPhamRepo.findAll().stream().filter(SanPham::getDaXoa).toList();
     }
 
     private void kiemTraTrangThai(String tt) {

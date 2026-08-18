@@ -7,4 +7,7 @@ import java.util.List;
 
 public interface DonHangRepository extends JpaRepository<DonHang, Long> {
     List<DonHang> findAllByOrderByCreatedAtDesc();
+
+    /** Đơn chưa bị xoá mềm, mới nhất trước. */
+    List<DonHang> findByDaXoaFalseOrderByCreatedAtDesc();
 }

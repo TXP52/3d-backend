@@ -5,10 +5,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import vn.in3d.backend.entity.NguoiDung;
+import vn.in3d.backend.entity.MauSac;
 import vn.in3d.backend.entity.NhaCungCap;
 import vn.in3d.backend.entity.SanPham;
 import vn.in3d.backend.entity.VatTu;
 import vn.in3d.backend.repository.NguoiDungRepository;
+import vn.in3d.backend.repository.MauSacRepository;
 import vn.in3d.backend.repository.NhaCungCapRepository;
 import vn.in3d.backend.repository.SanPhamRepository;
 import vn.in3d.backend.repository.VatTuRepository;
@@ -29,13 +31,43 @@ public class DataSeeder {
     CommandLineRunner napDuLieuBanDau(NguoiDungRepository nguoiDungRepo,
                                       NhaCungCapRepository nccRepo,
                                       VatTuRepository vatTuRepo,
-                                      SanPhamRepository sanPhamRepo) {
+                                      SanPhamRepository sanPhamRepo,
+                                      MauSacRepository mauSacRepo) {
         return args -> {
             napAdmin(nguoiDungRepo);
+            napMauSac(mauSacRepo);
             Long shopeeId = napNhaCungCap(nccRepo);
             napVatTu(vatTuRepo, shopeeId);
             napSanPhamMau(sanPhamRepo);
         };
+    }
+
+    /** Bộ màu nhựa đang dùng trong kho + vài màu phổ biến. */
+    private void napMauSac(MauSacRepository repo) {
+        if (repo.count() > 0) return;
+        record M(String ten, String ma, int thuTu) {}
+        List<M> ds = List.of(
+                new M("Đỏ",     "#e03131", 1),
+                new M("Vàng",   "#f5b400", 2),
+                new M("Đen",    "#1c1c1c", 3),
+                new M("Trắng",  "#f8f9fa", 4),
+                new M("Be",     "#e0cda9", 5),
+                new M("Xám",    "#868e96", 6),
+                new M("Xanh lá","#2f9e44", 7),
+                new M("Xanh dương", "#1971c2", 8),
+                new M("Cam",    "#f76707", 9),
+                new M("Hồng",   "#e64980", 10),
+                new M("Tím",    "#7048e8", 11),
+                new M("Trong suốt", "#dee2e6", 12)
+        );
+        for (M m : ds) {
+            MauSac ms = new MauSac();
+            ms.setTen(m.ten());
+            ms.setMaMau(m.ma());
+            ms.setThuTu(m.thuTu());
+            repo.save(ms);
+        }
+        System.out.println("[IN3D] Đã nạp bảng màu sắc: " + ds.size() + " màu");
     }
 
     /**

@@ -56,7 +56,7 @@ public class DonHangService {
 
     @Transactional(readOnly = true)
     public List<DonHang> danhSachDon() {
-        List<DonHang> ds = donHangRepo.findAllByOrderByCreatedAtDesc();
+        List<DonHang> ds = donHangRepo.findByDaXoaFalseOrderByCreatedAtDesc();
         // Nạp sẵn chi tiết + thanh toán TRONG transaction, tránh LazyInitializationException khi trả JSON
         ds.forEach(this::napDuLieuCon);
         return ds;
@@ -95,7 +95,10 @@ public class DonHangService {
 
     @Transactional
     public void xoaDon(Long id) {
-        donHangRepo.delete(timDon(id));
+        // XOÁ MỀM: đơn hàng là chứng từ bán hàng, không xoá hẳn khỏi database
+        DonHang don = timDon(id);
+        don.xoaMem();
+        donHangRepo.save(don);
     }
 
     private DonHang timDon(Long id) {

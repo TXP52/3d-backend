@@ -2,7 +2,6 @@ package vn.in3d.backend.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
-import java.time.OffsetDateTime;
 
 /**
  * Người dùng — lưu TRỰC TIẾP trong database (không dùng Supabase Auth).
@@ -10,7 +9,7 @@ import java.time.OffsetDateTime;
  */
 @Entity
 @Table(name = "nguoi_dung")
-public class NguoiDung {
+public class NguoiDung extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -37,14 +36,6 @@ public class NguoiDung {
     @Column(name = "vai_tro", nullable = false)
     private String vaiTro = "khach_hang";
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-    }
-
     // Getter / Setter
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -60,5 +51,4 @@ public class NguoiDung {
     public void setDiaChi(String diaChi) { this.diaChi = diaChi; }
     public String getVaiTro() { return vaiTro; }
     public void setVaiTro(String vaiTro) { this.vaiTro = vaiTro; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
 }

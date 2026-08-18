@@ -1,12 +1,11 @@
 package vn.in3d.backend.entity;
 
 import jakarta.persistence.*;
-import java.time.OffsetDateTime;
 
 /** Sản phẩm — ánh xạ bảng public.san_pham (trùng schema Supabase). */
 @Entity
 @Table(name = "san_pham")
-public class SanPham {
+public class SanPham extends BanGhi {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -45,22 +44,7 @@ public class SanPham {
             columnDefinition = "varchar(40) default 'san_hang' not null")
     private String trangThai = "san_hang";
 
-    @Column(name = "created_at")
-    private OffsetDateTime createdAt;
-
-    @Column(name = "updated_at")
-    private OffsetDateTime updatedAt;
-
-    @PrePersist
-    void truocKhiLuu() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
-        updatedAt = OffsetDateTime.now();
-    }
-
-    @PreUpdate
-    void truocKhiCapNhat() {
-        updatedAt = OffsetDateTime.now();
-    }
+    // created_at / updated_at / is_deleted nằm ở lớp cha BanGhi
 
     // Getter / Setter
     public Long getId() { return id; }
@@ -83,6 +67,4 @@ public class SanPham {
     public void setDangBan(Boolean dangBan) { this.dangBan = dangBan; }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
-    public OffsetDateTime getCreatedAt() { return createdAt; }
-    public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

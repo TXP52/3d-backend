@@ -21,22 +21,29 @@ public class VatTuController {
 
     private final VatTuRepository vatTuRepo;
     private final NhaCungCapRepository nccRepo;
+    private final vn.in3d.backend.repository.MauSacRepository mauSacRepo;
 
-    public VatTuController(VatTuRepository vatTuRepo, NhaCungCapRepository nccRepo) {
+    public VatTuController(VatTuRepository vatTuRepo, NhaCungCapRepository nccRepo,
+                           vn.in3d.backend.repository.MauSacRepository mauSacRepo) {
         this.vatTuRepo = vatTuRepo;
         this.nccRepo = nccRepo;
+        this.mauSacRepo = mauSacRepo;
     }
 
     /* ---------------- Vật tư ---------------- */
 
     @GetMapping("/vat-tu")
     public List<Map<String, Object>> danhSach() {
-        return vatTuRepo.findAllByOrderByLoaiAscIdAsc().stream().map(v -> {
+        return vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc().stream().map(v -> {
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", v.getId());
             m.put("ten", v.getTen());
             m.put("loai", v.getLoai());
             m.put("mau", v.getMau());
+            m.put("mauSacId", v.getMauSacId());
+            m.put("maMau", v.getMauSacId() == null ? null :
+                    mauSacRepo.findById(v.getMauSacId())
+                              .map(vn.in3d.backend.entity.MauSac::getMaMau).orElse(null));
             m.put("gia", v.getGia());
             m.put("soLuong", v.getSoLuong());
             m.put("khoiLuongGram", v.getKhoiLuongGram());
@@ -52,6 +59,9 @@ public class VatTuController {
             m.put("conLaiGram", v.getConLaiGram());
             m.put("nhaCungCap", v.getNhaCungCapId() == null ? null :
                     nccRepo.findById(v.getNhaCungCapId()).map(NhaCungCap::getTen).orElse(null));
+            m.put("createdAt", v.getCreatedAt());
+            m.put("updatedAt", v.getUpdatedAt());
+            m.put("daXoa", v.getDaXoa());
             return m;
         }).toList();
     }
@@ -61,6 +71,9 @@ public class VatTuController {
     public VatTu them(@RequestBody VatTu vt) {
         vt.setId(null);
         kiemTraTrangThai(vt.getTrangThai());
+        if (vt.getMauSacId() != null) {
+            mauSacRepo.findById(vt.getMauSacId()).ifPresent(ms -> vt.setMau(ms.getTen()));
+        }
         return vatTuRepo.save(vt);
     }
 
@@ -85,6 +98,17 @@ public class VatTuController {
         if (td.containsKey("soLuong")) vt.setSoLuong(so(td.get("soLuong")).intValue());
         if (td.containsKey("khoiLuongGram")) vt.setKhoiLuongGram(so(td.get("khoiLuongGram")).intValue());
         if (td.containsKey("daDungGram")) vt.setDaDungGram(Math.max(0, so(td.get("daDungGram")).intValue()));
+        if (td.containsKey("mauSacId")) {
+            Object v = td.get("mauSacId");
+            if (v == null || String.valueOf(v).isBlank()) {
+                vt.setMauSacId(null);
+            } else {
+                Long mid = so(v);
+                vt.setMauSacId(mid);
+                // Chép tên màu sang cột mau để danh sách cũ vẫn đọc được
+                mauSacRepo.findById(mid).ifPresent(ms -> vt.setMau(ms.getTen()));
+            }
+        }
         if (td.containsKey("nhaCungCapId")) {
             Object v = td.get("nhaCungCapId");
             vt.setNhaCungCapId(v == null || String.valueOf(v).isBlank() ? null : so(v));
@@ -104,14 +128,18 @@ public class VatTuController {
     @DeleteMapping("/vat-tu/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void xoa(@PathVariable Long id) {
-        vatTuRepo.deleteById(id);
+        VatTu vt = vatTuRepo.findById(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Không tìm thấy vật tư."));
+        vt.xoaMem();
+        vatTuRepo.save(vt);
     }
 
     /* ---------------- Nhà cung cấp ---------------- */
 
     @GetMapping("/nha-cung-cap")
     public List<NhaCungCap> danhSachNcc() {
-        return nccRepo.findAll();
+        return nccRepo.findByDaXoaFalseOrderByIdAsc();
     }
 
     @PostMapping("/nha-cung-cap")
@@ -133,7 +161,11 @@ public class VatTuController {
     @DeleteMapping("/nha-cung-cap/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void xoaNcc(@PathVariable Long id) {
-        nccRepo.deleteById(id);
+        NhaCungCap n = nccRepo.findById(id)
+                .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Không tìm thấy nhà cung cấp."));
+        n.xoaMem();
+        nccRepo.save(n);
     }
 
     private void kiemTraTrangThai(String tt) {

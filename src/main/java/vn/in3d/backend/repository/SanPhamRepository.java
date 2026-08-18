@@ -7,4 +7,10 @@ import java.util.List;
 
 public interface SanPhamRepository extends JpaRepository<SanPham, Long> {
     List<SanPham> findByDangBanTrueOrderByIdAsc();
+
+    /** Hàng đang bán, chưa bị xoá mềm — dùng cho trang bán hàng. */
+    List<SanPham> findByDangBanTrueAndDaXoaFalseOrderByIdAsc();
+
+    /** Toàn bộ hàng chưa bị xoá mềm — dùng cho trang quản trị. */
+    List<SanPham> findByDaXoaFalseOrderByIdAsc();
 }
