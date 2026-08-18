@@ -122,7 +122,13 @@ public class DataSeeder {
         System.out.println("[IN3D] Đã nạp kho vật tư: 1 máy in + 2 cuộn PETG + 4 cuộn PLA");
     }
 
+    /**
+     * Sản phẩm mẫu MẶC ĐỊNH TẮT — chủ shop tự thêm sản phẩm thật qua trang quản trị.
+     * Nếu không tắt thì mỗi lần xoá hết sản phẩm rồi khởi động lại, hàng mẫu lại mọc ra.
+     * Muốn nạp lại hàng mẫu để xem thử: đặt biến môi trường IN3D_NAP_SAN_PHAM_MAU=true
+     */
     private void napSanPhamMau(SanPhamRepository repo) {
+        if (!"true".equalsIgnoreCase(System.getenv("IN3D_NAP_SAN_PHAM_MAU"))) return;
         if (repo.count() > 0) return;
         record Mau(String ten, long gia, String giaChu, int tonKho) {}
         List<Mau> mau = List.of(
