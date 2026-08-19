@@ -149,6 +149,24 @@ create table if not exists public.vat_tu (
   is_deleted       boolean     not null default false
 );
 
+-- Bài viết chia sẻ kiến thức in 3D (khối cuối trang chủ)
+create table if not exists public.bai_viet (
+  id          bigserial primary key,
+  tieu_de     text        not null,
+  duong_dan   text        unique,
+  tom_tat     text,
+  noi_dung    text,
+  hinh_anh    text,
+  tac_gia     text,
+  chuyen_muc  varchar(40) not null default 'huong-dan',
+  luot_xem    integer     not null default 0,
+  hien_thi    boolean     not null default true,
+  thu_tu      integer     not null default 0,
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now(),
+  is_deleted  boolean     not null default false
+);
+
 create table if not exists public.ma_otp (
   id          bigserial primary key,
   email       text        not null,
@@ -173,12 +191,13 @@ alter table public.san_pham add column if not exists loai_san_pham varchar(30) n
 create index if not exists idx_vat_tu_is_deleted   on public.vat_tu (is_deleted);
 create index if not exists idx_mau_sac_is_deleted  on public.mau_sac (is_deleted);
 create index if not exists idx_ncc_is_deleted      on public.nha_cung_cap (is_deleted);
+create index if not exists idx_bai_viet_hien_thi   on public.bai_viet (hien_thi, is_deleted);
 
 -- Trigger updated_at cho các bảng mới
 do $$
 declare t text;
 begin
-  foreach t in array array['mau_sac', 'nha_cung_cap', 'vat_tu', 'ma_otp'] loop
+  foreach t in array array['mau_sac', 'nha_cung_cap', 'vat_tu', 'ma_otp', 'bai_viet'] loop
     execute format('drop trigger if exists trg_%s_updated_at on public.%I', t, t);
     execute format('create trigger trg_%s_updated_at before update on public.%I
                     for each row execute function public.tu_dong_cap_nhat_updated_at()', t, t);
@@ -199,10 +218,15 @@ alter table public.mau_sac      enable row level security;
 alter table public.nha_cung_cap enable row level security;
 alter table public.vat_tu       enable row level security;
 alter table public.ma_otp       enable row level security;
+alter table public.bai_viet     enable row level security;
 
 -- Trang bán hàng chỉ cần ĐỌC màu để hiển thị
 create policy "ai_cung_xem_mau" on public.mau_sac
   for select to anon using (is_deleted = false);
+
+-- Bài viết là nội dung công khai: cho đọc bài đang bật, không cho ghi
+create policy "ai_cung_doc_bai_viet" on public.bai_viet
+  for select to anon using (is_deleted = false and hien_thi = true);
 
 
 -- ============================================================
