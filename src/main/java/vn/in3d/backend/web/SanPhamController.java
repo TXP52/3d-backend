@@ -20,6 +20,9 @@ public class SanPhamController {
             "du_kien", "da_dat", "dang_in", "san_hang",
             "thanh_cong", "hoan_hang", "dang_van_chuyen", "het_hang");
 
+    /** Loại sản phẩm hợp lệ. */
+    private static final Set<String> LOAI_SAN_PHAM = Set.of("ban", "mau", "dich_vu");
+
     private final SanPhamRepository sanPhamRepo;
 
     public SanPhamController(SanPhamRepository sanPhamRepo) {
@@ -47,6 +50,7 @@ public class SanPhamController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tên sản phẩm không được để trống.");
         }
         kiemTraTrangThai(sp.getTrangThai());
+        kiemTraLoai(sp.getLoaiSanPham());
         if (sp.getGiaChu() == null || sp.getGiaChu().isBlank()) sp.setGiaChu(dinhDangGia(sp.getGia()));
         return sanPhamRepo.save(sp);
     }
@@ -73,6 +77,11 @@ public class SanPhamController {
         }
         if (thayDoi.containsKey("dangBan")) {
             sp.setDangBan(Boolean.parseBoolean(String.valueOf(thayDoi.get("dangBan"))));
+        }
+        if (thayDoi.containsKey("loaiSanPham")) {
+            String l = String.valueOf(thayDoi.get("loaiSanPham"));
+            kiemTraLoai(l);
+            sp.setLoaiSanPham(l);
         }
         if (thayDoi.containsKey("trangThai")) {
             String tt = String.valueOf(thayDoi.get("trangThai"));
@@ -105,6 +114,14 @@ public class SanPhamController {
     @GetMapping("/san-pham/thung-rac")
     public List<SanPham> thungRac() {
         return sanPhamRepo.findAll().stream().filter(SanPham::getDaXoa).toList();
+    }
+
+    private void kiemTraLoai(String l) {
+        if (l == null || l.isBlank()) return;
+        if (!LOAI_SAN_PHAM.contains(l)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Loại sản phẩm không hợp lệ. Chỉ nhận: " + String.join(", ", LOAI_SAN_PHAM));
+        }
     }
 
     private void kiemTraTrangThai(String tt) {

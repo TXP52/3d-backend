@@ -39,6 +39,14 @@ public class SanPham extends BanGhi {
      * Trạng thái sản phẩm trong quy trình in:
      * du_kien | da_dat | dang_in | san_hang | thanh_cong | hoan_hang | dang_van_chuyen | het_hang
      */
+    /**
+     * Loại sản phẩm: ban (hàng bán) | mau (hàng mẫu, chỉ trưng bày) | dich_vu (nhận in theo yêu cầu)
+     * Hàng "mau" không tính vào doanh thu và không cho khách đặt.
+     */
+    @Column(name = "loai_san_pham", nullable = false,
+            columnDefinition = "varchar(30) default 'ban' not null")
+    private String loaiSanPham = "ban";
+
     // columnDefinition có DEFAULT để thêm cột vào bảng đã có dữ liệu không bị lỗi NOT NULL
     @Column(name = "trang_thai", nullable = false,
             columnDefinition = "varchar(40) default 'san_hang' not null")
@@ -65,6 +73,8 @@ public class SanPham extends BanGhi {
     public void setTonKho(Integer tonKho) { this.tonKho = tonKho; }
     public Boolean getDangBan() { return dangBan; }
     public void setDangBan(Boolean dangBan) { this.dangBan = dangBan; }
+    public String getLoaiSanPham() { return loaiSanPham; }
+    public void setLoaiSanPham(String loaiSanPham) { this.loaiSanPham = loaiSanPham; }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
 }

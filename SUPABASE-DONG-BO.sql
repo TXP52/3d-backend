@@ -161,8 +161,14 @@ create table if not exists public.ma_otp (
   is_deleted  boolean     not null default false
 );
 
--- Cột trạng thái cho sản phẩm (nếu bảng san_pham có từ trước mà chưa có cột này)
+-- Cột trạng thái + loại sản phẩm (nếu bảng san_pham có từ trước mà chưa có)
 alter table public.san_pham add column if not exists trang_thai varchar(40) not null default 'san_hang';
+alter table public.san_pham add column if not exists loai_san_pham varchar(30) not null default 'ban';
+
+-- don_hang.user_id đang là uuid trỏ sang auth.users (Supabase Auth) trong khi backend Java
+-- dùng bảng nguoi_dung với id kiểu số. Muốn nối đơn hàng với tài khoản do backend Java quản lý:
+--   alter table public.don_hang add column if not exists nguoi_dung_id bigint references public.nguoi_dung(id);
+-- Giữ nguyên user_id để dữ liệu cũ không mất. Chỉ chạy khi đã chốt dùng backend Java.
 
 create index if not exists idx_vat_tu_is_deleted   on public.vat_tu (is_deleted);
 create index if not exists idx_mau_sac_is_deleted  on public.mau_sac (is_deleted);
