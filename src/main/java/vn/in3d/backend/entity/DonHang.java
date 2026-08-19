@@ -32,8 +32,17 @@ public class DonHang extends BanGhi {
     @Column(name = "ghi_chu", columnDefinition = "text")
     private String ghiChu;
 
+    /** Số tiền khách phải trả, ĐÃ trừ khuyến mãi. Tạm tính = tongTien + tienGiam. */
     @Column(name = "tong_tien", nullable = false)
     private Long tongTien = 0L;
+
+    /** Mã khuyến mãi đã áp cho đơn này, để trống nếu không dùng mã. */
+    @Column(name = "ma_khuyen_mai", length = 40)
+    private String maKhuyenMai;
+
+    @Column(name = "tien_giam", nullable = false,
+            columnDefinition = "bigint default 0 not null")
+    private Long tienGiam = 0L;
 
     @Column(name = "trang_thai", nullable = false)
     private String trangThai = "cho_xac_nhan";
@@ -69,6 +78,13 @@ public class DonHang extends BanGhi {
     public void setGhiChu(String ghiChu) { this.ghiChu = ghiChu; }
     public Long getTongTien() { return tongTien; }
     public void setTongTien(Long tongTien) { this.tongTien = tongTien; }
+    public String getMaKhuyenMai() { return maKhuyenMai; }
+    public void setMaKhuyenMai(String maKhuyenMai) { this.maKhuyenMai = maKhuyenMai; }
+    public Long getTienGiam() { return tienGiam == null ? 0L : tienGiam; }
+    public void setTienGiam(Long tienGiam) { this.tienGiam = tienGiam == null ? 0L : tienGiam; }
+    /** Tiền hàng trước khi trừ khuyến mãi — tiện cho trang quản trị hiển thị. */
+    @Transient
+    public Long getTamTinh() { return getTongTien() + getTienGiam(); }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
     public List<DonHangChiTiet> getChiTiet() { return chiTiet; }

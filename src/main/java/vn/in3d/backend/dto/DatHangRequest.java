@@ -22,6 +22,13 @@ public record DatHangRequest(
 
         String ghiChu,
 
+        /**
+         * Mã khuyến mãi khách nhập ở giỏ hàng (có thể bỏ trống).
+         * Backend TỰ TÍNH lại tiền giảm từ mã này, không nhận số tiền giảm
+         * do trình duyệt gửi lên — sửa vài dòng JavaScript là mua được giá 0đ.
+         */
+        String maKhuyenMai,
+
         @NotEmpty(message = "Giỏ hàng đang trống")
         @Valid
         List<MatHang> matHang

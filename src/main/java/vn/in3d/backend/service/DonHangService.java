@@ -20,9 +20,11 @@ import java.util.concurrent.ThreadLocalRandom;
 public class DonHangService {
 
     private final DonHangRepository donHangRepo;
+    private final KhuyenMaiService khuyenMaiService;
 
-    public DonHangService(DonHangRepository donHangRepo) {
+    public DonHangService(DonHangRepository donHangRepo, KhuyenMaiService khuyenMaiService) {
         this.donHangRepo = donHangRepo;
+        this.khuyenMaiService = khuyenMaiService;
     }
 
     /** Tạo đơn mới: đơn hàng + từng món + bản ghi thanh toán COD. */
@@ -44,6 +46,18 @@ public class DonHangService {
             don.themChiTiet(ct);
             tongTien += ct.getThanhTien();
         }
+
+        // Khuyến mãi: TÍNH LẠI TỪ ĐẦU ở đây, không nhận số tiền giảm trình duyệt gửi lên.
+        // Mã sai / hết hạn / chưa đủ điều kiện -> kiemTra ném lỗi 400, đơn không được tạo.
+        Long idKhuyenMai = null;
+        String ma = yeuCau.maKhuyenMai();
+        if (ma != null && !ma.isBlank()) {
+            KhuyenMaiService.KetQua kq = khuyenMaiService.kiemTra(ma, tongTien);
+            don.setMaKhuyenMai(kq.khuyenMai().getMa());
+            don.setTienGiam(kq.tienGiam());
+            tongTien = kq.conLai();
+            idKhuyenMai = kq.khuyenMai().getId();
+        }
         don.setTongTien(tongTien);
 
         ThanhToan tt = new ThanhToan();
@@ -51,7 +65,10 @@ public class DonHangService {
         tt.setSoTien(tongTien);
         don.themThanhToan(tt);
 
-        return donHangRepo.save(don);
+        DonHang daLuu = donHangRepo.save(don);
+        // Chỉ trừ lượt khi đơn đã lưu xong; cùng transaction nên đơn lỗi là lượt cũng không mất
+        if (idKhuyenMai != null) khuyenMaiService.ghiNhanDaDung(idKhuyenMai);
+        return daLuu;
     }
 
     @Transactional(readOnly = true)

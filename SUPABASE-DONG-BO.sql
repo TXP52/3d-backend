@@ -149,6 +149,32 @@ create table if not exists public.vat_tu (
   is_deleted       boolean     not null default false
 );
 
+-- Chương trình khuyến mãi — khách nhập mã ở giỏ hàng
+create table if not exists public.khuyen_mai (
+  id            bigserial primary key,
+  ma            varchar(40) not null unique,
+  ten           text        not null,
+  mo_ta         text,
+  loai          varchar(20) not null default 'phan_tram',   -- phan_tram | so_tien | mien_ship
+  gia_tri       bigint      not null default 0,
+  giam_toi_da   bigint      not null default 0,             -- trần giảm cho loại %, 0 = không chặn
+  don_toi_thieu bigint      not null default 0,
+  bat_dau       date,
+  ket_thuc      date,
+  so_luong      integer     not null default 0,             -- 0 = không giới hạn lượt
+  da_dung       integer     not null default 0,
+  ap_dung_cho   varchar(20) not null default 'tat_ca',      -- tat_ca | san_pham | dich_vu
+  hoat_dong     boolean     not null default true,
+  hien_thi      boolean     not null default true,
+  created_at    timestamptz default now(),
+  updated_at    timestamptz default now(),
+  is_deleted    boolean     not null default false
+);
+
+-- Đơn hàng ghi lại mã đã dùng và số tiền đã giảm
+alter table public.don_hang add column if not exists ma_khuyen_mai varchar(40);
+alter table public.don_hang add column if not exists tien_giam bigint not null default 0;
+
 -- Bài viết chia sẻ kiến thức in 3D (khối cuối trang chủ)
 create table if not exists public.bai_viet (
   id          bigserial primary key,
@@ -192,12 +218,14 @@ create index if not exists idx_vat_tu_is_deleted   on public.vat_tu (is_deleted)
 create index if not exists idx_mau_sac_is_deleted  on public.mau_sac (is_deleted);
 create index if not exists idx_ncc_is_deleted      on public.nha_cung_cap (is_deleted);
 create index if not exists idx_bai_viet_hien_thi   on public.bai_viet (hien_thi, is_deleted);
+create index if not exists idx_khuyen_mai_ma        on public.khuyen_mai (ma);
+create index if not exists idx_khuyen_mai_hoat_dong on public.khuyen_mai (hoat_dong, is_deleted);
 
 -- Trigger updated_at cho các bảng mới
 do $$
 declare t text;
 begin
-  foreach t in array array['mau_sac', 'nha_cung_cap', 'vat_tu', 'ma_otp', 'bai_viet'] loop
+  foreach t in array array['mau_sac', 'nha_cung_cap', 'vat_tu', 'ma_otp', 'bai_viet', 'khuyen_mai'] loop
     execute format('drop trigger if exists trg_%s_updated_at on public.%I', t, t);
     execute format('create trigger trg_%s_updated_at before update on public.%I
                     for each row execute function public.tu_dong_cap_nhat_updated_at()', t, t);
@@ -219,6 +247,7 @@ alter table public.nha_cung_cap enable row level security;
 alter table public.vat_tu       enable row level security;
 alter table public.ma_otp       enable row level security;
 alter table public.bai_viet     enable row level security;
+alter table public.khuyen_mai   enable row level security;
 
 -- Trang bán hàng chỉ cần ĐỌC màu để hiển thị
 create policy "ai_cung_xem_mau" on public.mau_sac
@@ -227,6 +256,11 @@ create policy "ai_cung_xem_mau" on public.mau_sac
 -- Bài viết là nội dung công khai: cho đọc bài đang bật, không cho ghi
 create policy "ai_cung_doc_bai_viet" on public.bai_viet
   for select to anon using (is_deleted = false and hien_thi = true);
+
+-- Khuyến mãi: chỉ cho khách ĐỌC mã đang chạy để khoe ở trang chủ.
+-- Tuyệt đối không mở quyền ghi — sửa được da_dung là dùng mã hết lượt vô tư.
+create policy "ai_cung_doc_khuyen_mai" on public.khuyen_mai
+  for select to anon using (is_deleted = false and hoat_dong = true and hien_thi = true);
 
 
 -- ============================================================
