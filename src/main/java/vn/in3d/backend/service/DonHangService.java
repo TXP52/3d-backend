@@ -7,8 +7,11 @@ import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.dto.DatHangRequest;
 import vn.in3d.backend.entity.DonHang;
 import vn.in3d.backend.entity.DonHangChiTiet;
+import vn.in3d.backend.entity.KhuyenMai;
+import vn.in3d.backend.entity.SanPham;
 import vn.in3d.backend.entity.ThanhToan;
 import vn.in3d.backend.repository.DonHangRepository;
+import vn.in3d.backend.repository.SanPhamRepository;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -21,10 +24,14 @@ public class DonHangService {
 
     private final DonHangRepository donHangRepo;
     private final KhuyenMaiService khuyenMaiService;
+    private final SanPhamRepository sanPhamRepo;
 
-    public DonHangService(DonHangRepository donHangRepo, KhuyenMaiService khuyenMaiService) {
+    public DonHangService(DonHangRepository donHangRepo,
+                          KhuyenMaiService khuyenMaiService,
+                          SanPhamRepository sanPhamRepo) {
         this.donHangRepo = donHangRepo;
         this.khuyenMaiService = khuyenMaiService;
+        this.sanPhamRepo = sanPhamRepo;
     }
 
     /** Tạo đơn mới: đơn hàng + từng món + bản ghi thanh toán COD. */
@@ -37,17 +44,41 @@ public class DonHangService {
         don.setDiaChi(yeuCau.diaChi().trim());
         don.setGhiChu(yeuCau.ghiChu());
 
+        // Bước 1 — GIẢM GIÁ SẢN PHẨM (tự áp, không cần mã).
+        // Giá lấy từ DATABASE chứ không lấy giá trình duyệt gửi lên: giỏ hàng nằm
+        // trong localStorage, sửa một dòng là đặt được máy in 3D giá 1.000đ.
+        // Món không có trong bảng sản phẩm (in theo yêu cầu, thiết kế file...) thì
+        // đành theo giá gửi lên vì không có gì để đối chiếu.
+        List<KhuyenMai> kmSanPham = khuyenMaiService.khuyenMaiSanPhamDangChay();
         long tongTien = 0;
-        for (DatHangRequest.MatHang mh : yeuCau.matHang()) {
-            DonHangChiTiet ct = new DonHangChiTiet();
-            ct.setTenSanPham(mh.ten().trim());
-            ct.setDonGia(mh.donGia() == null ? 0 : mh.donGia());
-            ct.setSoLuong(mh.soLuong() == null ? 1 : mh.soLuong());
-            don.themChiTiet(ct);
-            tongTien += ct.getThanhTien();
-        }
+        long giamSanPham = 0;
 
-        // Khuyến mãi: TÍNH LẠI TỪ ĐẦU ở đây, không nhận số tiền giảm trình duyệt gửi lên.
+        for (DatHangRequest.MatHang mh : yeuCau.matHang()) {
+            String ten = mh.ten().trim();
+            long giaGui = mh.donGia() == null ? 0 : mh.donGia();
+            int soLuong = mh.soLuong() == null ? 1 : mh.soLuong();
+
+            SanPham sp = sanPhamRepo.findFirstByTenIgnoreCaseAndDaXoaFalse(ten).orElse(null);
+            long giaGoc = sp != null ? (sp.getGia() == null ? 0 : sp.getGia()) : giaGui;
+            KhuyenMaiService.GiaMon gia = sp != null
+                    ? khuyenMaiService.giaSauGiam(sp.getId(), giaGoc, kmSanPham)
+                    : new KhuyenMaiService.GiaMon(giaGoc, giaGoc, 0, null);
+
+            DonHangChiTiet ct = new DonHangChiTiet();
+            ct.setSanPhamId(sp != null ? sp.getId() : null);
+            ct.setTenSanPham(ten);
+            ct.setDonGiaGoc(gia.giaGoc());
+            ct.setDonGia(gia.giaSauGiam());
+            ct.setSoLuong(soLuong);
+            don.themChiTiet(ct);
+
+            tongTien += ct.getThanhTien();
+            giamSanPham += ct.getTienGiamDong();
+        }
+        don.setTienGiamSanPham(giamSanPham);
+
+        // Bước 2 — MÃ KHUYẾN MÃI ĐƠN HÀNG, tính trên số tiền ĐÃ giảm giá món.
+        // TÍNH LẠI TỪ ĐẦU ở đây, không nhận số tiền giảm trình duyệt gửi lên.
         // Mã sai / hết hạn / chưa đủ điều kiện -> kiemTra ném lỗi 400, đơn không được tạo.
         Long idKhuyenMai = null;
         String ma = yeuCau.maKhuyenMai();

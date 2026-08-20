@@ -7,7 +7,11 @@ import vn.in3d.backend.entity.KhuyenMai;
 import vn.in3d.backend.repository.KhuyenMaiRepository;
 import vn.in3d.backend.service.KhuyenMaiService;
 
+import vn.in3d.backend.entity.SanPham;
+import vn.in3d.backend.repository.SanPhamRepository;
+
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,13 +29,17 @@ public class KhuyenMaiController {
 
     private static final Set<String> LOAI = Set.of("phan_tram", "so_tien", "mien_ship");
     private static final Set<String> AP_DUNG_CHO = Set.of("tat_ca", "san_pham", "dich_vu");
+    private static final Set<String> KIEU_AP_DUNG = Set.of("don_hang", "san_pham");
 
     private final KhuyenMaiRepository repo;
     private final KhuyenMaiService dichVu;
+    private final SanPhamRepository sanPhamRepo;
 
-    public KhuyenMaiController(KhuyenMaiRepository repo, KhuyenMaiService dichVu) {
+    public KhuyenMaiController(KhuyenMaiRepository repo, KhuyenMaiService dichVu,
+                               SanPhamRepository sanPhamRepo) {
         this.repo = repo;
         this.dichVu = dichVu;
+        this.sanPhamRepo = sanPhamRepo;
     }
 
     /** @param tatCa true = lấy cả mã tạm dừng / hết hạn (dùng cho trang quản trị) */
@@ -47,6 +55,37 @@ public class KhuyenMaiController {
     @GetMapping("/thung-rac")
     public List<KhuyenMai> thungRac() {
         return repo.findByDaXoaTrueOrderByIdDesc();
+    }
+
+    /**
+     * Giá sau giảm của những sản phẩm ĐANG được khuyến mãi.
+     * Trang bán hàng và trang quản trị gọi cái này để hiện giá gạch ngang,
+     * khỏi phải cài lại luật "chọn chương trình giảm nhiều nhất" ở ba nơi.
+     * Sản phẩm không được giảm thì không có trong danh sách trả về.
+     */
+    @GetMapping("/gia-san-pham")
+    public List<Map<String, Object>> giaSanPham() {
+        List<KhuyenMai> dangChay = dichVu.khuyenMaiSanPhamDangChay();
+        List<Map<String, Object>> ra = new ArrayList<>();
+        if (dangChay.isEmpty()) return ra;
+
+        for (SanPham sp : sanPhamRepo.findByDangBanTrueAndDaXoaFalseOrderByIdAsc()) {
+            long giaGoc = sp.getGia() == null ? 0 : sp.getGia();
+            if (giaGoc <= 0) continue;                       // hàng "Liên hệ" thì không giảm gì
+            KhuyenMaiService.GiaMon g = dichVu.giaSauGiam(sp.getId(), giaGoc, dangChay);
+            if (!g.coGiam()) continue;
+
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("sanPhamId", sp.getId());
+            m.put("ten", sp.getTen());
+            m.put("giaGoc", g.giaGoc());
+            m.put("giaSauGiam", g.giaSauGiam());
+            m.put("giamMoiDonVi", g.giamMoiDonVi());
+            m.put("phanTram", Math.round(g.giamMoiDonVi() * 100.0 / g.giaGoc()));
+            m.put("tenKhuyenMai", g.khuyenMai() == null ? null : g.khuyenMai().getTen());
+            ra.add(m);
+        }
+        return ra;
     }
 
     @GetMapping("/{id}")
@@ -85,10 +124,13 @@ public class KhuyenMaiController {
         km.setId(null);
         km.setDaDung(0);
         km.setMa(chuanHoaMa(km.getMa()));
+        km.setSanPhamIds(chuanHoaDsId(km.getSanPhamIds()));
         kiemTraChung(km);
-        repo.findByMaIgnoreCaseAndDaXoaFalse(km.getMa()).ifPresent(cu -> {
-            throw badRequest("Mã \"" + cu.getMa() + "\" đã có rồi. Đặt mã khác nhé.");
-        });
+        if (km.getMa() != null) {
+            repo.findByMaIgnoreCaseAndDaXoaFalse(km.getMa()).ifPresent(cu -> {
+                throw badRequest("Mã \"" + cu.getMa() + "\" đã có rồi. Đặt mã khác nhé.");
+            });
+        }
         return repo.save(km);
     }
 
@@ -98,13 +140,17 @@ public class KhuyenMaiController {
 
         if (td.containsKey("ma")) {
             String maMoi = chuanHoaMa(chuoi(td.get("ma")));
-            repo.findByMaIgnoreCaseAndDaXoaFalse(maMoi)
-                    .filter(cu -> !cu.getId().equals(id))
-                    .ifPresent(cu -> { throw badRequest("Mã \"" + cu.getMa() + "\" đã có rồi. Đặt mã khác nhé."); });
+            if (maMoi != null) {
+                repo.findByMaIgnoreCaseAndDaXoaFalse(maMoi)
+                        .filter(cu -> !cu.getId().equals(id))
+                        .ifPresent(cu -> { throw badRequest("Mã \"" + cu.getMa() + "\" đã có rồi. Đặt mã khác nhé."); });
+            }
             km.setMa(maMoi);
         }
         if (td.containsKey("ten")) km.setTen(chuoi(td.get("ten")));
         if (td.containsKey("moTa")) km.setMoTa(chuoi(td.get("moTa")));
+        if (td.containsKey("kieuApDung")) km.setKieuApDung(chuoi(td.get("kieuApDung")));
+        if (td.containsKey("sanPhamIds")) km.setSanPhamIds(chuanHoaDsId(td.get("sanPhamIds")));
         if (td.containsKey("loai")) km.setLoai(chuoi(td.get("loai")));
         if (td.containsKey("giaTri")) km.setGiaTri(soLon(td.get("giaTri")));
         if (td.containsKey("giamToiDa")) km.setGiamToiDa(soLon(td.get("giamToiDa")));
@@ -140,12 +186,27 @@ public class KhuyenMaiController {
     // ---------------- Kiểm tra dữ liệu ----------------
 
     private void kiemTraChung(KhuyenMai km) {
-        if (km.getMa() == null || km.getMa().isBlank()) {
-            throw badRequest("Mã khuyến mãi không được để trống.");
+        if (!KIEU_AP_DUNG.contains(km.getKieuApDung())) {
+            throw badRequest("Kiểu áp dụng không hợp lệ. Chỉ nhận: don_hang (giảm theo đơn), "
+                    + "san_pham (giảm giá sản phẩm).");
         }
-        if (!km.getMa().matches("[A-Z0-9_-]{3,40}")) {
-            throw badRequest("Mã chỉ gồm chữ HOA không dấu, số, gạch ngang hoặc gạch dưới, dài 3-40 ký tự. "
-                    + "Ví dụ: GIAM10, FREESHIP-HN.");
+        // Giảm theo đơn thì phải có mã để khách gõ; giảm giá sản phẩm thì tự áp, không cần mã
+        if (km.laKhuyenMaiSanPham()) {
+            if (km.getMa() != null && !km.getMa().isBlank() && !km.getMa().matches("[A-Z0-9_-]{3,40}")) {
+                throw badRequest("Mã chỉ gồm chữ HOA không dấu, số, gạch ngang hoặc gạch dưới, dài 3-40 ký tự.");
+            }
+            if ("mien_ship".equals(km.getLoai())) {
+                throw badRequest("Miễn phí ship là ưu đãi của cả đơn, không giảm được vào giá từng món. "
+                        + "Chọn kiểu \"Giảm theo đơn hàng\" cho chương trình này.");
+            }
+        } else {
+            if (km.getMa() == null || km.getMa().isBlank()) {
+                throw badRequest("Khuyến mãi theo đơn phải có mã để khách nhập ở giỏ hàng.");
+            }
+            if (!km.getMa().matches("[A-Z0-9_-]{3,40}")) {
+                throw badRequest("Mã chỉ gồm chữ HOA không dấu, số, gạch ngang hoặc gạch dưới, dài 3-40 ký tự. "
+                        + "Ví dụ: GIAM10, FREESHIP-HN.");
+            }
         }
         if (km.getTen() == null || km.getTen().isBlank()) {
             throw badRequest("Tên chương trình không được để trống.");
@@ -179,8 +240,25 @@ public class KhuyenMaiController {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, thongBao);
     }
 
+    /** Chuỗi rỗng phải thành null, không thì hai khuyến mãi sản phẩm cùng mã "" là đụng unique. */
     private String chuanHoaMa(String ma) {
-        return ma == null ? null : ma.trim().toUpperCase().replaceAll("\\s+", "");
+        if (ma == null) return null;
+        String s = ma.trim().toUpperCase().replaceAll("\\s+", "");
+        return s.isEmpty() ? null : s;
+    }
+
+    /** "12, 15,,18" -> "12,15,18". Rỗng thành null = áp cho mọi sản phẩm. */
+    private String chuanHoaDsId(Object v) {
+        if (v == null) return null;
+        String s = String.valueOf(v);
+        List<String> ds = new ArrayList<>();
+        for (String phan : s.split(",")) {
+            String t = phan.trim();
+            if (t.isEmpty()) continue;
+            try { ds.add(String.valueOf(Long.parseLong(t))); }
+            catch (NumberFormatException e) { throw badRequest("Danh sách sản phẩm có phần tử không phải số: " + t); }
+        }
+        return ds.isEmpty() ? null : String.join(",", ds);
     }
 
     private String chuoi(Object v) {

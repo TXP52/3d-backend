@@ -27,8 +27,17 @@ public class DonHangChiTiet extends BanGhi {
     @Column(name = "ten_san_pham", nullable = false)
     private String tenSanPham;
 
+    /**
+     * Đơn giá SAU khi trừ khuyến mãi sản phẩm.
+     * Phải là giá cuối vì cột thanh_tien trong Supabase tự tính = don_gia * so_luong.
+     */
     @Column(name = "don_gia", nullable = false)
     private Long donGia = 0L;
+
+    /** Giá niêm yết trước khi giảm; bằng donGia nghĩa là món này không được giảm. */
+    @Column(name = "don_gia_goc", nullable = false,
+            columnDefinition = "bigint default 0 not null")
+    private Long donGiaGoc = 0L;
 
     @Column(name = "so_luong", nullable = false)
     private Integer soLuong = 1;
@@ -37,6 +46,13 @@ public class DonHangChiTiet extends BanGhi {
     @Transient
     public Long getThanhTien() {
         return (donGia == null ? 0 : donGia) * (soLuong == null ? 0 : soLuong);
+    }
+
+    /** Số tiền dòng này được giảm nhờ khuyến mãi sản phẩm. */
+    @Transient
+    public Long getTienGiamDong() {
+        long goc = donGiaGoc == null || donGiaGoc == 0 ? (donGia == null ? 0 : donGia) : donGiaGoc;
+        return Math.max(0, (goc - (donGia == null ? 0 : donGia)) * (soLuong == null ? 0 : soLuong));
     }
 
     // Getter / Setter
@@ -50,6 +66,8 @@ public class DonHangChiTiet extends BanGhi {
     public void setTenSanPham(String tenSanPham) { this.tenSanPham = tenSanPham; }
     public Long getDonGia() { return donGia; }
     public void setDonGia(Long donGia) { this.donGia = donGia; }
+    public Long getDonGiaGoc() { return donGiaGoc == null || donGiaGoc == 0 ? donGia : donGiaGoc; }
+    public void setDonGiaGoc(Long donGiaGoc) { this.donGiaGoc = donGiaGoc == null ? 0L : donGiaGoc; }
     public Integer getSoLuong() { return soLuong; }
     public void setSoLuong(Integer soLuong) { this.soLuong = soLuong; }
 }

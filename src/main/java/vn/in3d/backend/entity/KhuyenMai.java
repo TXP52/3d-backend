@@ -5,7 +5,17 @@ import jakarta.persistence.*;
 import java.time.LocalDate;
 
 /**
- * Chương trình khuyến mãi — khách nhập mã ở giỏ hàng để được giảm tiền.
+ * Chương trình khuyến mãi. Có HAI KIỂU:
+ *
+ *   kieu_ap_dung = "don_hang"  Khách gõ MÃ ở giỏ hàng, giảm trên tổng đơn.
+ *                              Mỗi đơn dùng được 1 mã.
+ *
+ *   kieu_ap_dung = "san_pham"  Giảm thẳng vào giá từng món trong danh sách
+ *                              sanPhamIds. TỰ ĐỘNG, khách không phải gõ gì,
+ *                              trang bán hàng hiện luôn giá gạch ngang.
+ *
+ * Hai kiểu CỘNG DỒN được: giá món giảm trước, mã đơn hàng giảm tiếp trên
+ * số tiền còn lại.
  *
  * Việc tính tiền giảm LUÔN LÀM Ở BACKEND khi tạo đơn, không tin con số
  * trình duyệt gửi lên. Trang khách chỉ gọi /kiem-tra để hiện trước cho khách xem.
@@ -18,8 +28,11 @@ public class KhuyenMai extends BanGhi {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Mã khách gõ ở giỏ hàng, viết HOA không dấu: GIAM10, FREESHIP... */
-    @Column(name = "ma", nullable = false, unique = true, length = 40)
+    /**
+     * Mã khách gõ ở giỏ hàng, viết HOA không dấu: GIAM10, FREESHIP...
+     * ĐỂ TRỐNG với khuyến mãi sản phẩm — loại đó tự áp, không có gì để gõ.
+     */
+    @Column(name = "ma", unique = true, length = 40)
     private String ma;
 
     @Column(name = "ten", nullable = false)
@@ -27,6 +40,18 @@ public class KhuyenMai extends BanGhi {
 
     @Column(name = "mo_ta", columnDefinition = "text")
     private String moTa;
+
+    /** don_hang (giảm theo đơn, cần mã) | san_pham (giảm giá món, tự áp) */
+    @Column(name = "kieu_ap_dung", nullable = false,
+            columnDefinition = "varchar(20) default 'don_hang' not null")
+    private String kieuApDung = "don_hang";
+
+    /**
+     * Danh sách id sản phẩm được giảm, ngăn bằng dấu phẩy: "12,15,18".
+     * Để trống = áp cho MỌI sản phẩm. Chỉ dùng khi kieuApDung = san_pham.
+     */
+    @Column(name = "san_pham_ids", columnDefinition = "text")
+    private String sanPhamIds;
 
     /**
      * phan_tram — giảm theo % tổng đơn (giaTri = số phần trăm)
@@ -106,6 +131,26 @@ public class KhuyenMai extends BanGhi {
         return "dang_chay".equals(getTrangThai());
     }
 
+    @Transient
+    public boolean laKhuyenMaiSanPham() {
+        return "san_pham".equals(kieuApDung);
+    }
+
+    /**
+     * Chương trình này có giảm cho sản phẩm id không?
+     * Danh sách trống nghĩa là áp cho tất cả sản phẩm.
+     */
+    @Transient
+    public boolean apDungChoSanPham(Long sanPhamId) {
+        if (!laKhuyenMaiSanPham() || sanPhamId == null) return false;
+        if (sanPhamIds == null || sanPhamIds.isBlank()) return true;
+        for (String phan : sanPhamIds.split(",")) {
+            String s = phan.trim();
+            if (!s.isEmpty() && s.equals(String.valueOf(sanPhamId))) return true;
+        }
+        return false;
+    }
+
     /** Số lượt còn lại; -1 nghĩa là không giới hạn. */
     @Transient
     public int getConLai() {
@@ -137,6 +182,10 @@ public class KhuyenMai extends BanGhi {
     public void setTen(String ten) { this.ten = ten; }
     public String getMoTa() { return moTa; }
     public void setMoTa(String moTa) { this.moTa = moTa; }
+    public String getKieuApDung() { return kieuApDung; }
+    public void setKieuApDung(String kieuApDung) { this.kieuApDung = kieuApDung; }
+    public String getSanPhamIds() { return sanPhamIds; }
+    public void setSanPhamIds(String sanPhamIds) { this.sanPhamIds = sanPhamIds; }
     public String getLoai() { return loai; }
     public void setLoai(String loai) { this.loai = loai; }
     public Long getGiaTri() { return giaTri == null ? 0L : giaTri; }

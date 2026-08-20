@@ -40,9 +40,15 @@ public class DonHang extends BanGhi {
     @Column(name = "ma_khuyen_mai", length = 40)
     private String maKhuyenMai;
 
+    /** Tiền giảm do MÃ khuyến mãi đơn hàng. */
     @Column(name = "tien_giam", nullable = false,
             columnDefinition = "bigint default 0 not null")
     private Long tienGiam = 0L;
+
+    /** Tiền giảm do khuyến mãi SẢN PHẨM (tự áp vào giá món, không cần mã). */
+    @Column(name = "tien_giam_san_pham", nullable = false,
+            columnDefinition = "bigint default 0 not null")
+    private Long tienGiamSanPham = 0L;
 
     @Column(name = "trang_thai", nullable = false)
     private String trangThai = "cho_xac_nhan";
@@ -82,9 +88,20 @@ public class DonHang extends BanGhi {
     public void setMaKhuyenMai(String maKhuyenMai) { this.maKhuyenMai = maKhuyenMai; }
     public Long getTienGiam() { return tienGiam == null ? 0L : tienGiam; }
     public void setTienGiam(Long tienGiam) { this.tienGiam = tienGiam == null ? 0L : tienGiam; }
-    /** Tiền hàng trước khi trừ khuyến mãi — tiện cho trang quản trị hiển thị. */
+    public Long getTienGiamSanPham() { return tienGiamSanPham == null ? 0L : tienGiamSanPham; }
+    public void setTienGiamSanPham(Long v) { this.tienGiamSanPham = v == null ? 0L : v; }
+
+    /** Tiền hàng sau giảm giá món, trước khi trừ mã đơn hàng. */
     @Transient
     public Long getTamTinh() { return getTongTien() + getTienGiam(); }
+
+    /** Tiền hàng theo giá niêm yết, chưa trừ khoản nào. */
+    @Transient
+    public Long getTienHangGoc() { return getTamTinh() + getTienGiamSanPham(); }
+
+    /** Tổng tất cả các khoản đã giảm cho đơn này. */
+    @Transient
+    public Long getTongGiam() { return getTienGiam() + getTienGiamSanPham(); }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
     public List<DonHangChiTiet> getChiTiet() { return chiTiet; }
