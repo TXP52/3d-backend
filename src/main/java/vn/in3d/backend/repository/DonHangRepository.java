@@ -10,4 +10,13 @@ public interface DonHangRepository extends JpaRepository<DonHang, Long> {
 
     /** Đơn chưa bị xoá mềm, mới nhất trước. */
     List<DonHang> findByDaXoaFalseOrderByCreatedAtDesc();
+
+    /**
+     * Đếm đơn của một tài khoản để biết có phải khách mới không.
+     * Đếm cả đơn đã xoá mềm: đặt rồi huỷ vẫn không còn là khách mới nữa.
+     */
+    long countByNguoiDungId(Long nguoiDungId);
+
+    /** Khách chưa đăng nhập thì đối chiếu bằng số điện thoại. */
+    long countBySoDienThoai(String soDienThoai);
 }

@@ -11,8 +11,13 @@
 -- Gồm 4 phần, bôi đen hết rồi bấm Run một lần:
 --   PHẦN 1 — SỬA GẤP: khôi phục 3 bảng bị hỏng sau khi xoá bảng profiles
 --   PHẦN 2 — Thêm created_at / updated_at / is_deleted cho mọi bảng
---   PHẦN 3 — Tạo bảng màu sắc, khuyến mãi, bài viết và các bảng còn thiếu
+--   PHẦN 3 — Tạo bảng màu sắc, khuyến mãi, bài viết và các bảng còn thiếu;
+--            bỏ don_hang.user_id (auth.users), nối sang nguoi_dung.id
 --   PHẦN 4 — Quyền truy cập (RLS)
+--
+-- CHẠY THẾ NÀO: mở Supabase → SQL Editor → dán cả file → Ctrl+A → Run.
+-- Chạy xong kéo xuống dưới cùng xem bảng kết quả, phải thấy đủ 12 bảng
+-- trong đó có khuyen_mai và bai_viet.
 -- ============================================================
 
 
@@ -168,6 +173,8 @@ create table if not exists public.khuyen_mai (
   gia_tri       bigint      not null default 0,
   giam_toi_da   bigint      not null default 0,            -- trần giảm cho loại %, 0 = không chặn
   don_toi_thieu bigint      not null default 0,
+  chi_khach_moi boolean     not null default false,        -- chỉ người chưa từng đặt đơn nào
+  dieu_kien_dia_chi text,                                  -- địa chỉ phải chứa 1 trong các từ khoá
   san_pham_ids  text,                                      -- "12,15,18"; rỗng = mọi sản phẩm
   bat_dau       date,
   ket_thuc      date,
@@ -181,9 +188,11 @@ create table if not exists public.khuyen_mai (
   is_deleted    boolean     not null default false
 );
 
--- Bảng đã tạo từ bản SQL trước thì bổ sung 2 cột mới và bỏ ràng buộc NOT NULL của mã
+-- Bảng đã tạo từ bản SQL trước thì bổ sung cột mới và bỏ ràng buộc NOT NULL của mã
 alter table public.khuyen_mai add column if not exists kieu_ap_dung varchar(20) not null default 'don_hang';
 alter table public.khuyen_mai add column if not exists san_pham_ids text;
+alter table public.khuyen_mai add column if not exists chi_khach_moi boolean not null default false;
+alter table public.khuyen_mai add column if not exists dieu_kien_dia_chi text;
 alter table public.khuyen_mai alter column ma drop not null;
 
 -- Đơn hàng ghi lại mã đã dùng và số tiền đã giảm
@@ -191,6 +200,30 @@ alter table public.don_hang add column if not exists ma_khuyen_mai varchar(40);
 alter table public.don_hang add column if not exists tien_giam bigint not null default 0;
 -- Tiền giảm do khuyến mãi SẢN PHẨM (tách khỏi tien_giam của mã đơn hàng)
 alter table public.don_hang add column if not exists tien_giam_san_pham bigint not null default 0;
+
+-- ------------------------------------------------------------
+-- NỐI ĐƠN HÀNG VỚI TÀI KHOẢN DO BACKEND JAVA QUẢN LÝ
+-- Cột cũ don_hang.user_id là uuid trỏ sang auth.users của Supabase Auth —
+-- di tích từ thời định dùng Supabase Auth, backend Java không hề ghi vào đó.
+-- Thay bằng nguoi_dung_id kiểu số, khoá ngoại thẳng sang bảng nguoi_dung.
+-- ------------------------------------------------------------
+alter table public.don_hang add column if not exists nguoi_dung_id bigint;
+
+do $$
+begin
+  if not exists (select 1 from information_schema.table_constraints
+                 where constraint_name = 'fk_don_hang_nguoi_dung' and table_schema = 'public') then
+    alter table public.don_hang
+      add constraint fk_don_hang_nguoi_dung
+      foreign key (nguoi_dung_id) references public.nguoi_dung(id);
+  end if;
+end $$;
+
+create index if not exists idx_don_hang_nguoi_dung on public.don_hang (nguoi_dung_id);
+
+-- Bỏ hẳn cột uuid cũ. Cột này luôn rỗng vì backend Java chưa từng ghi vào,
+-- nên xoá không mất dữ liệu nào. Chạy sau cùng để lỡ có gì còn tra lại được.
+alter table public.don_hang drop column if exists user_id;
 
 -- Từng dòng hàng nhớ giá gốc để hiện "199.000đ (giá gốc 290.000đ)"
 -- Lưu ý: don_gia là giá SAU giảm vì cột thanh_tien trong Supabase tự tính = don_gia * so_luong
@@ -230,11 +263,6 @@ create table if not exists public.ma_otp (
 -- Cột trạng thái + loại sản phẩm (nếu bảng san_pham có từ trước mà chưa có)
 alter table public.san_pham add column if not exists trang_thai varchar(40) not null default 'san_hang';
 alter table public.san_pham add column if not exists loai_san_pham varchar(30) not null default 'ban';
-
--- don_hang.user_id đang là uuid trỏ sang auth.users (Supabase Auth) trong khi backend Java
--- dùng bảng nguoi_dung với id kiểu số. Muốn nối đơn hàng với tài khoản do backend Java quản lý:
---   alter table public.don_hang add column if not exists nguoi_dung_id bigint references public.nguoi_dung(id);
--- Giữ nguyên user_id để dữ liệu cũ không mất. Chỉ chạy khi đã chốt dùng backend Java.
 
 create index if not exists idx_vat_tu_is_deleted     on public.vat_tu (is_deleted);
 create index if not exists idx_mau_sac_is_deleted    on public.mau_sac (is_deleted);

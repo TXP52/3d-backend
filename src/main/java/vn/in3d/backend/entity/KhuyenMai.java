@@ -76,6 +76,23 @@ public class KhuyenMai extends BanGhi {
             columnDefinition = "bigint default 0 not null")
     private Long donToiThieu = 0L;
 
+    /**
+     * Chỉ khách hàng MỚI dùng được — người chưa từng có đơn nào.
+     * Đối chiếu theo tài khoản đăng nhập; chưa đăng nhập thì theo số điện thoại.
+     */
+    @Column(name = "chi_khach_moi", nullable = false,
+            columnDefinition = "boolean default false not null")
+    private Boolean chiKhachMoi = Boolean.FALSE;
+
+    /**
+     * Địa chỉ nhận hàng phải chứa MỘT trong các từ khoá này, ngăn bằng dấu phẩy.
+     * So sánh bỏ dấu và không phân biệt hoa thường, nên "Cau Giay" khớp "Cầu Giấy".
+     * Để trống = giao đâu cũng dùng được.
+     * Ví dụ mã freeship nội thành Hà Nội: "Ba Đình,Hoàn Kiếm,Đống Đa,..."
+     */
+    @Column(name = "dieu_kien_dia_chi", columnDefinition = "text")
+    private String dieuKienDiaChi;
+
     /** Ngày bắt đầu / kết thúc, tính cả hai đầu. Để trống = không giới hạn. */
     @Column(name = "bat_dau")
     private LocalDate batDau;
@@ -158,6 +175,31 @@ public class KhuyenMai extends BanGhi {
     }
 
     /**
+     * Địa chỉ giao hàng có thoả điều kiện không.
+     * So sánh sau khi bỏ dấu để khách gõ "cau giay" hay "Cầu Giấy" đều nhận.
+     */
+    @Transient
+    public boolean hopDiaChi(String diaChi) {
+        if (dieuKienDiaChi == null || dieuKienDiaChi.isBlank()) return true;
+        if (diaChi == null || diaChi.isBlank()) return false;
+        String dc = boDau(diaChi);
+        for (String tu : dieuKienDiaChi.split(",")) {
+            String t = boDau(tu);
+            if (!t.isEmpty() && dc.contains(t)) return true;
+        }
+        return false;
+    }
+
+    /** "Cầu Giấy, Hà Nội" -> "cau giay, ha noi" */
+    static String boDau(String s) {
+        if (s == null) return "";
+        return java.text.Normalizer.normalize(s.trim(), java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "")
+                .replace('đ', 'd').replace('Đ', 'D')
+                .toLowerCase();
+    }
+
+    /**
      * Tính tiền giảm cho một đơn có tạm tính = tongTien.
      * Không kiểm tra điều kiện ở đây — nơi gọi phải kiểm tra trước.
      */
@@ -194,6 +236,10 @@ public class KhuyenMai extends BanGhi {
     public void setGiamToiDa(Long giamToiDa) { this.giamToiDa = giamToiDa == null ? 0L : giamToiDa; }
     public Long getDonToiThieu() { return donToiThieu == null ? 0L : donToiThieu; }
     public void setDonToiThieu(Long donToiThieu) { this.donToiThieu = donToiThieu == null ? 0L : donToiThieu; }
+    public Boolean getChiKhachMoi() { return chiKhachMoi != null && chiKhachMoi; }
+    public void setChiKhachMoi(Boolean v) { this.chiKhachMoi = v != null && v; }
+    public String getDieuKienDiaChi() { return dieuKienDiaChi; }
+    public void setDieuKienDiaChi(String v) { this.dieuKienDiaChi = v; }
     public LocalDate getBatDau() { return batDau; }
     public void setBatDau(LocalDate batDau) { this.batDau = batDau; }
     public LocalDate getKetThuc() { return ketThuc; }

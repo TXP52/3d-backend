@@ -7,12 +7,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.entity.MauSac;
 import vn.in3d.backend.entity.NhaCungCap;
-import vn.in3d.backend.entity.SanPham;
 import vn.in3d.backend.entity.VatTu;
 import vn.in3d.backend.repository.NguoiDungRepository;
 import vn.in3d.backend.repository.MauSacRepository;
 import vn.in3d.backend.repository.NhaCungCapRepository;
-import vn.in3d.backend.repository.SanPhamRepository;
 import vn.in3d.backend.repository.VatTuRepository;
 
 import java.util.List;
@@ -31,14 +29,12 @@ public class DataSeeder {
     CommandLineRunner napDuLieuBanDau(NguoiDungRepository nguoiDungRepo,
                                       NhaCungCapRepository nccRepo,
                                       VatTuRepository vatTuRepo,
-                                      SanPhamRepository sanPhamRepo,
                                       MauSacRepository mauSacRepo) {
         return args -> {
             napAdmin(nguoiDungRepo);
             napMauSac(mauSacRepo);
             Long shopeeId = napNhaCungCap(nccRepo);
             napVatTu(vatTuRepo, shopeeId);
-            napSanPhamMau(sanPhamRepo);
         };
     }
 
@@ -154,30 +150,4 @@ public class DataSeeder {
         System.out.println("[IN3D] Đã nạp kho vật tư: 1 máy in + 2 cuộn PETG + 4 cuộn PLA");
     }
 
-    /**
-     * Sản phẩm mẫu MẶC ĐỊNH TẮT — chủ shop tự thêm sản phẩm thật qua trang quản trị.
-     * Nếu không tắt thì mỗi lần xoá hết sản phẩm rồi khởi động lại, hàng mẫu lại mọc ra.
-     * Muốn nạp lại hàng mẫu để xem thử: đặt biến môi trường IN3D_NAP_SAN_PHAM_MAU=true
-     */
-    private void napSanPhamMau(SanPhamRepository repo) {
-        if (!"true".equalsIgnoreCase(System.getenv("IN3D_NAP_SAN_PHAM_MAU"))) return;
-        if (repo.count() > 0) return;
-        record Mau(String ten, long gia, String giaChu, int tonKho) {}
-        List<Mau> mau = List.of(
-                new Mau("Máy in 3D Bambu Lab A1", 10_900_000, "10.900.000₫", 1),
-                new Mau("Nhựa PLA 1.75mm (1kg)", 290_000, "290.000₫", 4),
-                new Mau("Nhựa PETG 1.75mm (1kg)", 320_000, "320.000₫", 2),
-                new Mau("Mô hình in 3D theo yêu cầu", 0, "Tính theo gram", 0),
-                new Mau("Dịch vụ in 3D theo yêu cầu", 0, "Liên hệ", 0)
-        );
-        for (Mau m : mau) {
-            SanPham sp = new SanPham();
-            sp.setTen(m.ten());
-            sp.setGia(m.gia());
-            sp.setGiaChu(m.giaChu());
-            sp.setTonKho(m.tonKho());
-            sp.setDangBan(true);
-            repo.save(sp);
-        }
-    }
 }

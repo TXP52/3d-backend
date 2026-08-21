@@ -20,6 +20,15 @@ public class DonHang extends BanGhi {
     @Column(name = "ma_don", nullable = false, unique = true)
     private String maDon;
 
+    /**
+     * Tài khoản đã đặt đơn này, trỏ sang nguoi_dung.id.
+     * Cột cũ user_id (uuid trỏ auth.users của Supabase Auth) đã bỏ —
+     * tài khoản do backend Java quản lý ở bảng nguoi_dung, id kiểu số.
+     * Để trống nghĩa là khách đặt mà không đăng nhập.
+     */
+    @Column(name = "nguoi_dung_id")
+    private Long nguoiDungId;
+
     @Column(name = "ten_khach", nullable = false)
     private String tenKhach;
 
@@ -74,6 +83,8 @@ public class DonHang extends BanGhi {
     public void setId(Long id) { this.id = id; }
     public String getMaDon() { return maDon; }
     public void setMaDon(String maDon) { this.maDon = maDon; }
+    public Long getNguoiDungId() { return nguoiDungId; }
+    public void setNguoiDungId(Long nguoiDungId) { this.nguoiDungId = nguoiDungId; }
     public String getTenKhach() { return tenKhach; }
     public void setTenKhach(String tenKhach) { this.tenKhach = tenKhach; }
     public String getSoDienThoai() { return soDienThoai; }

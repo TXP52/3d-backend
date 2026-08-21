@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.entity.KhuyenMai;
+import vn.in3d.backend.repository.DonHangRepository;
 import vn.in3d.backend.repository.KhuyenMaiRepository;
 
 import java.time.format.DateTimeFormatter;
@@ -33,13 +34,23 @@ public class KhuyenMaiService {
     private static final DateTimeFormatter NGAY_VN = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
     private final KhuyenMaiRepository repo;
+    private final DonHangRepository donHangRepo;
 
-    public KhuyenMaiService(KhuyenMaiRepository repo) {
+    public KhuyenMaiService(KhuyenMaiRepository repo, DonHangRepository donHangRepo) {
         this.repo = repo;
+        this.donHangRepo = donHangRepo;
     }
 
     /** Kết quả áp mã đơn hàng: mã nào, giảm bao nhiêu, còn phải trả bao nhiêu. */
     public record KetQua(KhuyenMai khuyenMai, long tienGiam, long conLai) {}
+
+    /**
+     * Người đang đặt hàng, để kiểm tra điều kiện "chỉ khách hàng mới"
+     * và "địa chỉ phải thuộc khu vực nào".
+     */
+    public record NguoiDat(Long nguoiDungId, String soDienThoai, String diaChi) {
+        public static NguoiDat khongRo() { return new NguoiDat(null, null, null); }
+    }
 
     /** Giá một món sau khi trừ khuyến mãi sản phẩm. */
     public record GiaMon(long giaGoc, long giaSauGiam, long giamMoiDonVi, KhuyenMai khuyenMai) {
@@ -95,6 +106,11 @@ public class KhuyenMaiService {
      */
     @Transactional(readOnly = true)
     public KetQua kiemTra(String ma, long tongTien) {
+        return kiemTra(ma, tongTien, NguoiDat.khongRo());
+    }
+
+    @Transactional(readOnly = true)
+    public KetQua kiemTra(String ma, long tongTien, NguoiDat nguoiDat) {
         if (ma == null || ma.isBlank()) {
             throw loi("Vui lòng nhập mã khuyến mãi.");
         }
@@ -120,8 +136,35 @@ public class KhuyenMaiService {
                     + "Đơn hiện tại " + tien(tongTien) + ", còn thiếu " + tien(km.getDonToiThieu() - tongTien) + ".");
         }
 
+        // Chỉ dành cho khách hàng mới
+        if (km.getChiKhachMoi() && daTungMuaHang(nguoiDat)) {
+            throw loi("Mã này chỉ dành cho khách hàng mới — bạn đã từng đặt hàng ở shop rồi.");
+        }
+
+        // Giới hạn khu vực giao hàng (mã freeship nội thành chẳng hạn)
+        if (!km.hopDiaChi(nguoiDat.diaChi())) {
+            throw loi(nguoiDat.diaChi() == null || nguoiDat.diaChi().isBlank()
+                    ? "Mã này chỉ áp dụng cho một số khu vực. Bạn nhập địa chỉ nhận hàng trước rồi áp mã lại nhé."
+                    : "Mã này không áp dụng cho địa chỉ bạn nhập. Chỉ giao trong khu vực: "
+                      + km.getDieuKienDiaChi().replace(",", ", ") + ".");
+        }
+
         long giam = km.tinhTienGiam(tongTien);
         return new KetQua(km, giam, tongTien - giam);
+    }
+
+    /**
+     * Khách này đã từng đặt hàng chưa.
+     * Ưu tiên tài khoản đăng nhập; chưa đăng nhập thì đối chiếu số điện thoại —
+     * không chặt bằng nhưng đủ để không ai lấy mã khách mới dùng mãi.
+     * Không biết gì về khách thì coi như khách mới, thà rộng còn hơn chặn oan.
+     */
+    private boolean daTungMuaHang(NguoiDat n) {
+        if (n.nguoiDungId() != null) return donHangRepo.countByNguoiDungId(n.nguoiDungId()) > 0;
+        if (n.soDienThoai() != null && !n.soDienThoai().isBlank()) {
+            return donHangRepo.countBySoDienThoai(n.soDienThoai().trim()) > 0;
+        }
+        return false;
     }
 
     /** Ghi nhận đã dùng thêm 1 lượt. Gọi sau khi đơn được lưu thành công. */

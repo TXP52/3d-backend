@@ -164,6 +164,16 @@ public class XacThucService {
         return email.substring(0, 3) + "***" + email.substring(at);
     }
 
+    /**
+     * Đọc token nhưng KHÔNG ném lỗi khi thiếu / sai / hết hạn — trả null.
+     * Dùng ở chỗ đăng nhập là tuỳ chọn: khách vãng lai vẫn đặt hàng được,
+     * đăng nhập rồi thì đơn mới nối được vào tài khoản.
+     */
+    public NguoiDung docTokenNeuCo(String authorization) {
+        try { return docToken(authorization); }
+        catch (Exception bo) { return null; }
+    }
+
     /** Đọc token từ header Authorization, trả về người dùng (hoặc 401). */
     public NguoiDung docToken(String authorization) {
         if (authorization == null || !authorization.startsWith("Bearer ")) loi401();

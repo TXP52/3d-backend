@@ -7,8 +7,10 @@ import vn.in3d.backend.entity.KhuyenMai;
 import vn.in3d.backend.repository.KhuyenMaiRepository;
 import vn.in3d.backend.service.KhuyenMaiService;
 
+import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.entity.SanPham;
 import vn.in3d.backend.repository.SanPhamRepository;
+import vn.in3d.backend.service.XacThucService;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -34,12 +36,14 @@ public class KhuyenMaiController {
     private final KhuyenMaiRepository repo;
     private final KhuyenMaiService dichVu;
     private final SanPhamRepository sanPhamRepo;
+    private final XacThucService xacThuc;
 
     public KhuyenMaiController(KhuyenMaiRepository repo, KhuyenMaiService dichVu,
-                               SanPhamRepository sanPhamRepo) {
+                               SanPhamRepository sanPhamRepo, XacThucService xacThuc) {
         this.repo = repo;
         this.dichVu = dichVu;
         this.sanPhamRepo = sanPhamRepo;
+        this.xacThuc = xacThuc;
     }
 
     /** @param tatCa true = lấy cả mã tạm dừng / hết hạn (dùng cho trang quản trị) */
@@ -99,11 +103,19 @@ public class KhuyenMaiController {
      * Mã sai / hết hạn / chưa đủ điều kiện -> 400 kèm câu giải thích tiếng Việt.
      */
     @PostMapping("/kiem-tra")
-    public Map<String, Object> kiemTra(@RequestBody Map<String, Object> body) {
+    public Map<String, Object> kiemTra(@RequestBody Map<String, Object> body,
+                                       @RequestHeader(value = "Authorization", required = false) String authorization) {
         String ma = body.get("ma") == null ? "" : String.valueOf(body.get("ma"));
         long tongTien = soLon(body.get("tongTien"));
 
-        KhuyenMaiService.KetQua kq = dichVu.kiemTra(ma, tongTien);
+        // Địa chỉ + tài khoản để kiểm tra "chỉ khách mới" và "chỉ giao khu vực này"
+        NguoiDung nd = xacThuc.docTokenNeuCo(authorization);
+        KhuyenMaiService.NguoiDat nguoiDat = new KhuyenMaiService.NguoiDat(
+                nd == null ? null : nd.getId(),
+                chuoi(body.get("soDienThoai")),
+                chuoi(body.get("diaChi")));
+
+        KhuyenMaiService.KetQua kq = dichVu.kiemTra(ma, tongTien, nguoiDat);
         KhuyenMai km = kq.khuyenMai();
 
         Map<String, Object> ra = new LinkedHashMap<>();
@@ -155,6 +167,8 @@ public class KhuyenMaiController {
         if (td.containsKey("giaTri")) km.setGiaTri(soLon(td.get("giaTri")));
         if (td.containsKey("giamToiDa")) km.setGiamToiDa(soLon(td.get("giamToiDa")));
         if (td.containsKey("donToiThieu")) km.setDonToiThieu(soLon(td.get("donToiThieu")));
+        if (td.containsKey("chiKhachMoi")) km.setChiKhachMoi(Boolean.parseBoolean(String.valueOf(td.get("chiKhachMoi"))));
+        if (td.containsKey("dieuKienDiaChi")) km.setDieuKienDiaChi(chuoi(td.get("dieuKienDiaChi")));
         if (td.containsKey("batDau")) km.setBatDau(ngay(td.get("batDau")));
         if (td.containsKey("ketThuc")) km.setKetThuc(ngay(td.get("ketThuc")));
         if (td.containsKey("soLuong")) km.setSoLuong((int) soLon(td.get("soLuong")));
@@ -167,11 +181,21 @@ public class KhuyenMaiController {
         return repo.save(km);
     }
 
-    /** XOÁ MỀM: đơn cũ đã dùng mã này vẫn tra ngược được. */
+    /**
+     * XOÁ MỀM: đơn cũ đã dùng mã này vẫn tra ngược được.
+     *
+     * Cột ma là khoá DUY NHẤT trên toàn bảng, kể cả dòng đã xoá mềm. Nếu giữ
+     * nguyên mã thì xoá "FREESHIPHN" xong tạo lại "FREESHIPHN" là database chặn,
+     * mà giao diện lại không thấy mã cũ đâu để hiểu vì sao. Nên khi xoá thì gắn
+     * hậu tố "#id" để nhả mã ra; khôi phục sẽ cắt hậu tố đi.
+     */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void xoa(@PathVariable Long id) {
         KhuyenMai km = repo.findById(id).orElseThrow(this::khongThay);
+        if (km.getMa() != null && !km.getMa().contains("#")) {
+            km.setMa(km.getMa() + "#" + km.getId());
+        }
         km.xoaMem();
         repo.save(km);
     }
@@ -179,6 +203,18 @@ public class KhuyenMaiController {
     @PutMapping("/{id}/khoi-phuc")
     public KhuyenMai khoiPhuc(@PathVariable Long id) {
         KhuyenMai km = repo.findById(id).orElseThrow(this::khongThay);
+        String ma = km.getMa();
+        if (ma != null && ma.contains("#")) {
+            String goc = ma.substring(0, ma.indexOf('#'));
+            // Mã gốc chưa ai chiếm thì trả lại; chiếm rồi thì giữ nguyên mã có hậu tố
+            // và báo cho chủ shop tự đặt mã khác, chứ không âm thầm đổi mã của người ta.
+            if (repo.findByMaIgnoreCaseAndDaXoaFalse(goc).isEmpty()) {
+                km.setMa(goc);
+            } else {
+                throw badRequest("Đã có mã \"" + goc + "\" đang dùng nên không khôi phục nguyên mã được. "
+                        + "Hãy đổi tên mã đang chạy rồi khôi phục lại.");
+            }
+        }
         km.khoiPhuc();
         return repo.save(km);
     }

@@ -37,8 +37,17 @@ public class DonHangService {
     /** Tạo đơn mới: đơn hàng + từng món + bản ghi thanh toán COD. */
     @Transactional
     public DonHang datHang(DatHangRequest yeuCau) {
+        return datHang(yeuCau, null);
+    }
+
+    /**
+     * @param nguoiDungId tài khoản đang đăng nhập (null nếu khách đặt không đăng nhập)
+     */
+    @Transactional
+    public DonHang datHang(DatHangRequest yeuCau, Long nguoiDungId) {
         DonHang don = new DonHang();
         don.setMaDon(sinhMaDon());
+        don.setNguoiDungId(nguoiDungId);
         don.setTenKhach(yeuCau.tenKhach().trim());
         don.setSoDienThoai(yeuCau.soDienThoai().trim());
         don.setDiaChi(yeuCau.diaChi().trim());
@@ -83,7 +92,10 @@ public class DonHangService {
         Long idKhuyenMai = null;
         String ma = yeuCau.maKhuyenMai();
         if (ma != null && !ma.isBlank()) {
-            KhuyenMaiService.KetQua kq = khuyenMaiService.kiemTra(ma, tongTien);
+            // Kèm theo người đặt để kiểm tra "chỉ khách mới" và "chỉ giao khu vực này"
+            KhuyenMaiService.NguoiDat nguoiDat = new KhuyenMaiService.NguoiDat(
+                    nguoiDungId, don.getSoDienThoai(), don.getDiaChi());
+            KhuyenMaiService.KetQua kq = khuyenMaiService.kiemTra(ma, tongTien, nguoiDat);
             don.setMaKhuyenMai(kq.khuyenMai().getMa());
             don.setTienGiam(kq.tienGiam());
             tongTien = kq.conLai();

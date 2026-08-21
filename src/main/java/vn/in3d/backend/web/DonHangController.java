@@ -5,7 +5,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import vn.in3d.backend.dto.DatHangRequest;
 import vn.in3d.backend.entity.DonHang;
+import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.service.DonHangService;
+import vn.in3d.backend.service.XacThucService;
 
 import java.util.List;
 import java.util.Map;
@@ -16,16 +18,23 @@ import java.util.Map;
 public class DonHangController {
 
     private final DonHangService donHangService;
+    private final XacThucService xacThuc;
 
-    public DonHangController(DonHangService donHangService) {
+    public DonHangController(DonHangService donHangService, XacThucService xacThuc) {
         this.donHangService = donHangService;
+        this.xacThuc = xacThuc;
     }
 
-    /** Khách đặt hàng (website bán hàng gọi). */
+    /**
+     * Khách đặt hàng (website bán hàng gọi).
+     * Có token thì nối đơn vào tài khoản; không có vẫn đặt được như khách vãng lai.
+     */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public DonHang datHang(@Valid @RequestBody DatHangRequest yeuCau) {
-        return donHangService.datHang(yeuCau);
+    public DonHang datHang(@Valid @RequestBody DatHangRequest yeuCau,
+                           @RequestHeader(value = "Authorization", required = false) String authorization) {
+        NguoiDung nd = xacThuc.docTokenNeuCo(authorization);
+        return donHangService.datHang(yeuCau, nd == null ? null : nd.getId());
     }
 
     /** Danh sách đơn, mới nhất trước (trang quản trị gọi). */

@@ -33,6 +33,13 @@ public class NangCapSchema {
                     List.of(
                             "alter table khuyen_mai alter column ma set null",        // H2
                             "alter table khuyen_mai alter column ma drop not null"    // PostgreSQL
+                    ),
+                    // Mã của chương trình ĐÃ XOÁ vẫn chiếm chỗ vì cột ma là khoá duy nhất
+                    // trên toàn bảng. Gắn hậu tố "#id" để nhả mã ra cho chương trình mới
+                    // dùng lại — khớp với cách xoá mới trong KhuyenMaiController.
+                    List.of(
+                            "update khuyen_mai set ma = concat(ma, '#', id) "
+                            + "where is_deleted = true and ma is not null and ma not like '%#%'"
                     )
             );
 

@@ -36,4 +36,20 @@ public class LoiValidateHandler {
         return ResponseEntity.status(ex.getStatusCode())
                 .body(Map.of("loi", ex.getReason() == null ? "Có lỗi xảy ra" : ex.getReason()));
     }
+
+    /**
+     * Đụng ràng buộc của database (trùng khoá duy nhất, thiếu khoá ngoại...).
+     * Không bắt thì Spring trả 500 kèm trang lỗi, người dùng chỉ thấy "Lỗi backend: HTTP 500"
+     * mà không biết vướng ở đâu.
+     */
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, String> xuLyTrungDuLieu(org.springframework.dao.DataIntegrityViolationException ex) {
+        String chiTiet = ex.getMostSpecificCause().getMessage();
+        boolean trung = chiTiet != null
+                && (chiTiet.toLowerCase().contains("unique") || chiTiet.toLowerCase().contains("duplicate"));
+        return Map.of("loi", trung
+                ? "Dữ liệu bị trùng với một bản ghi đã có (mã, email hoặc đường dẫn). Hãy đổi giá trị khác."
+                : "Database từ chối dữ liệu này. Kiểm tra lại các ô bắt buộc rồi thử lại.");
+    }
 }
