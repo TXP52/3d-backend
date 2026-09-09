@@ -18,6 +18,11 @@
 -- CHẠY THẾ NÀO: mở Supabase → SQL Editor → dán cả file → Ctrl+A → Run.
 -- Chạy xong kéo xuống dưới cùng xem bảng kết quả, phải thấy đủ 12 bảng
 -- trong đó có khuyen_mai và bai_viet.
+--
+-- Postgres gói cả script vào MỘT giao dịch: một câu lỗi là huỷ sạch mọi thứ
+-- đã chạy trước đó. Nên hai việc dễ vướng nhất — bỏ cột user_id và nối khoá
+-- ngoại nguoi_dung_id — được bọc trong khối bắt lỗi riêng: hỏng thì chỉ mình
+-- việc đó bỏ qua kèm ghi chú, phần còn lại vẫn tạo bảng bình thường.
 -- ============================================================
 
 
@@ -216,14 +221,50 @@ begin
     alter table public.don_hang
       add constraint fk_don_hang_nguoi_dung
       foreign key (nguoi_dung_id) references public.nguoi_dung(id);
+    raise notice 'Đã nối don_hang.nguoi_dung_id -> nguoi_dung.id';
   end if;
+exception when others then
+  raise notice 'CHƯA nối được khoá ngoại nguoi_dung_id: %', sqlerrm;
 end $$;
 
 create index if not exists idx_don_hang_nguoi_dung on public.don_hang (nguoi_dung_id);
 
+-- Cột user_id đang bị 6 policy RLS bám vào nên không xoá thẳng được:
+--   dat don hang / xem don cua minh          (don_hang)
+--   them chi tiet don / xem chi tiet don cua minh (don_hang_chi_tiet)
+--   tao thanh toan / xem thanh toan cua minh (thanh_toan)
+-- Mấy policy này viết theo kiểu "auth.uid() = user_id" của Supabase Auth.
+-- Từ khi bỏ Supabase Auth thì auth.uid() luôn null nên chúng KHÔNG cho ai
+-- xem được gì nữa — giữ lại chỉ tổ chặn việc bỏ cột. Xoá đi không mất quyền nào.
+do $$
+declare r record;
+begin
+  for r in
+    select schemaname, tablename, policyname
+    from pg_policies
+    where schemaname = 'public'
+      and tablename in ('don_hang', 'don_hang_chi_tiet', 'thanh_toan')
+      and (coalesce(qual::text, '') like '%user_id%'
+        or coalesce(with_check::text, '') like '%user_id%')
+  loop
+    execute format('drop policy %I on %I.%I', r.policyname, r.schemaname, r.tablename);
+    raise notice 'Đã xoá policy "%" trên bảng % (bám vào user_id)', r.policyname, r.tablename;
+  end loop;
+end $$;
+
 -- Bỏ hẳn cột uuid cũ. Cột này luôn rỗng vì backend Java chưa từng ghi vào,
--- nên xoá không mất dữ liệu nào. Chạy sau cùng để lỡ có gì còn tra lại được.
-alter table public.don_hang drop column if exists user_id;
+-- nên xoá không mất dữ liệu nào.
+-- Bọc trong khối bắt lỗi: nếu vẫn còn thứ gì bám vào cột thì chỉ mình câu này
+-- bỏ qua, phần còn lại của file vẫn chạy tiếp — thay vì cả script rollback sạch
+-- rồi lại thiếu bảng như hai lần trước.
+do $$
+begin
+  alter table public.don_hang drop column if exists user_id;
+  raise notice 'Đã bỏ cột don_hang.user_id';
+exception when others then
+  raise notice 'CHƯA bỏ được cột user_id: %', sqlerrm;
+  raise notice 'Phần còn lại của script vẫn chạy bình thường. Xem thứ nào đang bám vào cột bằng câu ở cuối file.';
+end $$;
 
 -- Từng dòng hàng nhớ giá gốc để hiện "199.000đ (giá gốc 290.000đ)"
 -- Lưu ý: don_gia là giá SAU giảm vì cột thanh_tien trong Supabase tự tính = don_gia * so_luong
@@ -332,15 +373,95 @@ create policy "ai_cung_doc_khuyen_mai" on public.khuyen_mai
 
 -- ============================================================
 -- KIỂM TRA LẠI SAU KHI CHẠY
--- Cột nào cũng phải là true, và phải thấy đủ các bảng:
--- bai_viet, danh_muc, don_hang, don_hang_chi_tiet, khuyen_mai, ma_otp,
--- mau_sac, nguoi_dung, nha_cung_cap, san_pham, thanh_toan, vat_tu
+--
+-- Supabase chỉ hiện kết quả của câu CUỐI CÙNG, nên bảng kiểm tra để ở đây.
+-- Cột ket_qua phải là "OK" hết. Chỗ nào "CHƯA" thì đọc cột ghi_chu.
+--
+-- Lưu ý: hai việc bọc trong khối bắt lỗi (bỏ user_id, nối khoá ngoại) nếu
+-- hỏng chỉ báo bằng NOTICE — Supabase hay giấu notice, nên cứ nhìn bảng này.
 -- ============================================================
-select table_name,
-       bool_or(column_name = 'created_at') as co_created_at,
-       bool_or(column_name = 'updated_at') as co_updated_at,
-       bool_or(column_name = 'is_deleted') as co_is_deleted
-from information_schema.columns
-where table_schema = 'public'
-group by table_name
-order by table_name;
+with kiem_tra as (
+  select 1 as stt, 'Bảng khuyen_mai' as muc,
+         (select count(*) from information_schema.tables
+          where table_schema = 'public' and table_name = 'khuyen_mai') as co,
+         'Chưa có thì script dừng giữa chừng, chạy lại cả file' as ghi_chu
+  union all
+  select 2, 'Bảng bai_viet',
+         (select count(*) from information_schema.tables
+          where table_schema = 'public' and table_name = 'bai_viet'),
+         'Chưa có thì script dừng giữa chừng, chạy lại cả file'
+  union all
+  select 3, 'khuyen_mai.chi_khach_moi',
+         (select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'khuyen_mai' and column_name = 'chi_khach_moi'),
+         'Điều kiện của mã KHACHHANGMOI'
+  union all
+  select 4, 'khuyen_mai.dieu_kien_dia_chi',
+         (select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'khuyen_mai' and column_name = 'dieu_kien_dia_chi'),
+         'Điều kiện khu vực của mã FREESHIPHN'
+  union all
+  select 5, 'don_hang.nguoi_dung_id',
+         (select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'don_hang' and column_name = 'nguoi_dung_id'),
+         'Cột nối đơn hàng với bảng nguoi_dung'
+  union all
+  select 6, 'Khoá ngoại nguoi_dung_id',
+         (select count(*) from information_schema.table_constraints
+          where table_schema = 'public' and constraint_name = 'fk_don_hang_nguoi_dung'),
+         'Chưa có vẫn dùng được, chỉ là database không tự kiểm tra hộ'
+  union all
+  select 7, 'don_hang_chi_tiet.don_gia_goc',
+         (select count(*) from information_schema.columns
+          where table_schema = 'public' and table_name = 'don_hang_chi_tiet' and column_name = 'don_gia_goc'),
+         'Giá trước khi giảm của từng dòng hàng'
+  -- Cái này ngược: CÒN cột user_id mới là chưa xong
+  union all
+  select 8, 'Đã bỏ don_hang.user_id',
+         1 - (select count(*) from information_schema.columns
+              where table_schema = 'public' and table_name = 'don_hang' and column_name = 'user_id'),
+         'Còn thì bỏ dấu -- ở mục 2 phần CHẠY RIÊNG bên dưới để xem vướng gì'
+)
+select muc,
+       case when co > 0 then 'OK' else 'CHƯA' end as ket_qua,
+       ghi_chu
+from kiem_tra
+order by stt;
+
+
+-- ============================================================
+-- CHẠY RIÊNG KHI CẦN (bôi đen từng câu rồi Run)
+-- ============================================================
+
+-- 1. Danh sách bảng + 3 cột chung. Phải thấy đủ 12 bảng:
+--    bai_viet, danh_muc, don_hang, don_hang_chi_tiet, khuyen_mai, ma_otp,
+--    mau_sac, nguoi_dung, nha_cung_cap, san_pham, thanh_toan, vat_tu
+-- select table_name,
+--        bool_or(column_name = 'created_at') as co_created_at,
+--        bool_or(column_name = 'updated_at') as co_updated_at,
+--        bool_or(column_name = 'is_deleted') as co_is_deleted
+-- from information_schema.columns
+-- where table_schema = 'public'
+-- group by table_name
+-- order by table_name;
+
+-- 2. Mục "Đã bỏ don_hang.user_id" báo CHƯA -> xem thứ gì đang bám vào cột.
+--    Cột qual/with_check cho biết policy đó viết điều kiện gì.
+-- select tablename, policyname, qual::text, with_check::text
+-- from pg_policies
+-- where schemaname = 'public'
+--   and (coalesce(qual::text, '') like '%user_id%'
+--     or coalesce(with_check::text, '') like '%user_id%');
+
+-- 3. Xem còn policy nào trên 3 bảng đơn hàng. Sau khi chạy file này chỉ nên
+--    còn 3 policy khach_tao_* (cho anon INSERT), không còn policy nào của
+--    Supabase Auth cũ.
+-- select tablename, policyname, cmd, roles::text
+-- from pg_policies
+-- where schemaname = 'public'
+--   and tablename in ('don_hang', 'don_hang_chi_tiet', 'thanh_toan')
+-- order by tablename, policyname;
+
+-- 4. Ép bỏ cột user_id kèm mọi thứ bám vào nó. CHỈ dùng khi mục 2 cho thấy
+--    toàn policy của Supabase Auth cũ — CASCADE xoá luôn cả những policy đó.
+-- alter table public.don_hang drop column user_id cascade;
