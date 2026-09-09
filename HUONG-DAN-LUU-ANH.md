@@ -2,7 +2,7 @@
 
 > Rà soát ngày **17/08/2026**. Mọi con số hạn mức trong tài liệu này đã được đối chiếu trực tiếp với trang giá / tài liệu chính thức của từng nhà cung cấp tại ngày đó. Chỗ nào chưa kiểm chứng được đều ghi rõ `[CHƯA XÁC MINH]` — đừng coi là chắc chắn.
 >
-> Bối cảnh: backend Spring Boot 3.3 chạy local cổng 8090 (`D:\3d\3d-backend`), H2 file, frontend HTML/JS thuần (`D:\3d\3d\public`), đã có sẵn project Supabase `nmptxzbtngztzxpwdprs`. Ràng buộc: **không tốn tiền, không cần thẻ tín dụng, ưu tiên đơn giản**.
+> Bối cảnh: backend Spring Boot 3.3 chạy local cổng 8090 (`D:\3d\3d-backend`), database Supabase PostgreSQL, frontend HTML/JS thuần (`D:\3d\3d\public`), đã có sẵn project Supabase `nmptxzbtngztzxpwdprs`. Ràng buộc: **không tốn tiền, không cần thẻ tín dụng, ưu tiên đơn giản**.
 
 ---
 
@@ -42,7 +42,7 @@ Phương án đang chạy: **lưu ảnh trên ổ đĩa máy chạy backend — 
 | **Uploadcare** | 1.000 operations/tháng · 5 GB traffic · 1 GB storage | Không | ⭐⭐ Dễ (widget HTML thuần) | Trang giá ghi thẳng **"Personal use only"** trên gói Free → shop bán hàng là vi phạm; "operation" định nghĩa rất rộng (mỗi upload, mỗi transformation = 1); gói trả phí rẻ nhất **66 USD/tháng** |
 | **imgbb** | Ảnh ≤ 32 MB, không công bố quota | Không | ⭐ Rất dễ | **ToS cấm dùng thương mại** ("any revenue-generating endeavor or commercial enterprise") và cho phép xoá tài khoản + nội dung **bất kỳ lúc nào, không báo trước** |
 | **Catbox.moe** | File ≤ 200 MB, không công bố quota | Không | ⭐⭐ (không có CORS → phải proxy qua backend) | FAQ cấm nguyên văn "image host for your business/ecommerce site"; dịch vụ sống bằng quyên góp, không SLA |
-| **Base64 / bytea trong DB** | Theo quota DB: H2 local vô hạn; Supabase Free **500 MB/project** | Không | ⭐⭐ Dễ về code | base64 phình +33%; 300 ảnh × 800 KB → ~320 MB = 64% quota DB; vượt 500 MB → **Free project chuyển read-only, mất luôn khả năng ghi đơn hàng**; ảnh đi qua JVM+JDBC, không cache riêng từng ảnh, ăn quota **uncached** eo hẹp hơn |
+| **Base64 / bytea trong DB** | Theo quota DB: Supabase Free **500 MB/project** | Không | ⭐⭐ Dễ về code | base64 phình +33%; 300 ảnh × 800 KB → ~320 MB = 64% quota DB; vượt 500 MB → **Free project chuyển read-only, mất luôn khả năng ghi đơn hàng**; ảnh đi qua JVM+JDBC, không cache riêng từng ảnh, ăn quota **uncached** eo hẹp hơn |
 | **Cloudflare Images** | 5.000 unique transformations/tháng — **chỉ cho ảnh lưu ở nơi khác**, không có storage miễn phí | Có (để dùng phần storage) | ⭐⭐⭐ | **Không phải chỗ lưu ảnh** — chỉ là lớp resize/CDN; cần domain đã trỏ nameserver về Cloudflare `[CHƯA XÁC MINH LẠI]` |
 | **Render (host)** | 750 giờ instance/tháng · **5 GB băng thông** (giảm từ 100 GB ngày 23/04/2026) · ngủ sau 15 phút | Không bắt buộc để bắt đầu | ⭐⭐⭐ | Filesystem **ephemeral**: "uploaded images … are lost every time the service redeploys, restarts, or spins down" — và free service ngủ sau 15 phút vắng khách. Free **không gắn được** Persistent Disk |
 | **Railway (host)** | Gói Free $0 kèm **$1 credit/tháng** · 0.5 GB RAM · **volume 0,5 GB** | `[CHƯA XÁC MINH]` | ⭐⭐⭐ | $1/tháng không đủ nuôi service chạy 24/7 → shop không online liên tục nếu không nạp tiền |
@@ -402,7 +402,7 @@ Trang giá ngày 17/08/2026 chỉ còn Pro **$29/mo**, Scale $299/mo, Enterprise
 - [ ] Đổi hàm upload của trang admin từ `POST /api/anh` sang `taiAnhLen()`
 - [ ] Đẩy ảnh cũ trong `D:\3d\3d-backend\data\anh` lên bucket, cập nhật cột path trong DB
 - [ ] Bật cron ping DB hằng ngày (GitHub Actions / UptimeRobot)
-- [ ] Giữ `data\anh` làm kho ảnh gốc + backup, đưa vào quy trình sao lưu cùng `data\in3d.mv.db`
+- [ ] Giữ `data\anh` làm kho ảnh gốc + backup, đưa vào quy trình sao lưu (database đã nằm trên Supabase)
 
 **Theo dõi hằng tháng**
 

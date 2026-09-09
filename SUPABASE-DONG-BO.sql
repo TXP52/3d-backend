@@ -200,6 +200,12 @@ alter table public.khuyen_mai add column if not exists chi_khach_moi boolean not
 alter table public.khuyen_mai add column if not exists dieu_kien_dia_chi text;
 alter table public.khuyen_mai alter column ma drop not null;
 
+-- Ma cua chuong trinh DA XOA van chiem cho vi cot ma la khoa duy nhat tren
+-- toan bang. Gan hau to "#id" de nha ma ra cho chuong trinh moi dung lai —
+-- khop voi cach xoa trong KhuyenMaiController.
+update public.khuyen_mai set ma = concat(ma, '#', id)
+where is_deleted = true and ma is not null and ma not like '%#%';
+
 -- Đơn hàng ghi lại mã đã dùng và số tiền đã giảm
 alter table public.don_hang add column if not exists ma_khuyen_mai varchar(40);
 alter table public.don_hang add column if not exists tien_giam bigint not null default 0;

@@ -11,4 +11,5 @@ spring.datasource.username=postgres.nmptxzbtngztzxpwdprs
 spring.datasource.password=<dien-mat-khau-database-vao-day>
 
 spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+# Schema do SUPABASE-DONG-BO.sql quan ly, Java khong tu sua
 spring.jpa.hibernate.ddl-auto=none

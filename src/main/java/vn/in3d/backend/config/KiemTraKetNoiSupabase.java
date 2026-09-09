@@ -4,21 +4,52 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.context.annotation.Profile;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.ResultSet;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Kiểm tra kết nối Supabase NGAY KHI KHỞI ĐỘNG (chỉ chạy ở profile "supabase").
- * Mục đích: thay lỗi khó hiểu "Unable to determine Dialect without JDBC metadata"
- * bằng thông báo tiếng Việt chỉ rõ nguyên nhân và cách sửa.
+ * Kiểm tra Supabase NGAY KHI KHỞI ĐỘNG.
+ *
+ * Hai việc:
+ *   1. Nối được database chưa — thay lỗi khó hiểu "Unable to determine Dialect
+ *      without JDBC metadata" bằng câu tiếng Việt chỉ rõ phải sửa ở đâu.
+ *   2. Schema có đủ bảng và cột app cần chưa.
+ *
+ * Việc thứ hai cần thiết vì ddl-auto để "none": Java không tự thêm bảng/cột
+ * nữa (để "update" thì Hibernate đòi sửa 40 cột của Supabase và làm chết app
+ * lúc khởi động — xem ghi chú trong application-supabase.properties).
+ * Thiếu gì thì báo ngay lúc chạy server, thay vì để trang quản trị lỗi 500
+ * rồi mới đi mò.
  */
 @Configuration
 @Profile("supabase")
 public class KiemTraKetNoiSupabase {
 
+    /** Bảng -> cột bắt buộc phải có. Thiếu là chưa chạy SUPABASE-DONG-BO.sql bản mới. */
+    private static final Map<String, List<String>> CAN_CO = Map.of(
+            "nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted"),
+            "san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham", "is_deleted"),
+            "don_hang",          List.of("id", "ma_don", "tong_tien", "ma_khuyen_mai", "tien_giam",
+                                         "tien_giam_san_pham", "nguoi_dung_id", "is_deleted"),
+            "don_hang_chi_tiet", List.of("id", "don_hang_id", "don_gia", "don_gia_goc", "so_luong"),
+            "thanh_toan",        List.of("id", "don_hang_id", "so_tien", "trang_thai"),
+            "khuyen_mai",        List.of("id", "ma", "kieu_ap_dung", "chi_khach_moi",
+                                         "dieu_kien_dia_chi", "san_pham_ids", "is_deleted"),
+            "bai_viet",          List.of("id", "tieu_de", "duong_dan", "chuyen_muc", "is_deleted"),
+            "mau_sac",           List.of("id", "ten", "ma_mau", "is_deleted"),
+            "vat_tu",            List.of("id", "ten", "loai", "gia", "trang_thai", "is_deleted"),
+            "nha_cung_cap",      List.of("id", "ten", "is_deleted"));
+
+    // Order thấp nhất: chạy trước mọi seeder, seeder không nên ghi vào schema hỏng
     @Bean
+    @Order(-100)
     ApplicationRunner kiemTraKetNoiDb(DataSource dataSource,
                                       @Value("${spring.datasource.url:}") String url,
                                       @Value("${spring.datasource.password:}") String matKhau) {
@@ -37,15 +68,19 @@ public class KiemTraKetNoiSupabase {
                         2. <dien-mat-khau-database-vao-day> trong spring.datasource.password
                            -> lấy tại Dashboard -> Settings -> Database (Reset nếu quên)
 
+                        Chưa có file thì copy từ application-supabase.properties.example.
                         Sau đó build lại: mvn package -DskipTests  rồi chạy lại.
-                        Hoặc bỏ profile supabase để chạy thử với H2:  java -jar target\\in3d-backend-1.0.0.jar
                         ============================================================
                         """);
             }
+
             try (Connection c = dataSource.getConnection()) {
                 System.out.println("[IN3D] ✔ Kết nối Supabase PostgreSQL thành công: "
                         + c.getMetaData().getDatabaseProductName() + " "
                         + c.getMetaData().getDatabaseProductVersion());
+                kiemTraSchema(c);
+            } catch (IllegalStateException loiSchema) {
+                throw loiSchema;
             } catch (Exception e) {
                 throw new IllegalStateException("""
 
@@ -64,5 +99,48 @@ public class KiemTraKetNoiSupabase {
                         """.formatted(e.getMessage()), e);
             }
         };
+    }
+
+    /** Soát từng bảng/cột app cần; thiếu thì dừng ngay kèm danh sách cụ thể. */
+    private void kiemTraSchema(Connection c) throws Exception {
+        List<String> thieu = new ArrayList<>();
+
+        for (var muc : CAN_CO.entrySet()) {
+            String bang = muc.getKey();
+            List<String> coTrongDb = new ArrayList<>();
+            try (var ps = c.prepareStatement(
+                    "select column_name from information_schema.columns "
+                    + "where table_schema = 'public' and table_name = ?")) {
+                ps.setString(1, bang);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) coTrongDb.add(rs.getString(1));
+                }
+            }
+            if (coTrongDb.isEmpty()) {
+                thieu.add("  - THIẾU HẲN BẢNG: " + bang);
+                continue;
+            }
+            for (String cot : muc.getValue()) {
+                if (!coTrongDb.contains(cot)) thieu.add("  - " + bang + " thiếu cột: " + cot);
+            }
+        }
+
+        if (thieu.isEmpty()) {
+            System.out.println("[IN3D] ✔ Schema Supabase đủ " + CAN_CO.size() + " bảng app cần");
+            return;
+        }
+        throw new IllegalStateException("""
+
+                ============================================================
+                [IN3D] SCHEMA SUPABASE CHƯA ĐỦ — app dừng để bạn khỏi mất công mò.
+
+                %s
+
+                CÁCH SỬA: mở Supabase -> SQL Editor -> dán cả file
+                          3d-backend/SUPABASE-DONG-BO.sql  -> Ctrl+A -> Run.
+                Chạy lại bao nhiêu lần cũng được. Xong xem bảng kiểm tra ở cuối
+                kết quả, cột ket_qua phải "OK" hết, rồi chạy lại server.
+                ============================================================
+                """.formatted(String.join("\n", thieu)));
     }
 }

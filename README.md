@@ -5,9 +5,10 @@ Backend Java cho hệ thống bán hàng IN3D Shop, phục vụ cả **website b
 ## Công nghệ
 
 - Java 17 + Spring Boot 3.3 (Web, Data JPA, Validation)
-- Database:
-  - **Mặc định:** H2 (file `./data/in3d.mv.db`) — chạy thử ngay không cần cài gì
-  - **Profile `supabase`:** PostgreSQL của Supabase (database dùng chung, schema tại `../backend/schema.sql`)
+- Database: **PostgreSQL của Supabase** — database duy nhất, không còn H2.
+  Thông tin kết nối để ở `src/main/resources/application-supabase.properties`
+  (file này gitignore vì chứa mật khẩu; chưa có thì copy từ file `.example`).
+  Schema do `SUPABASE-DONG-BO.sql` quản lý.
 
 ## Chạy backend
 
@@ -76,9 +77,18 @@ Nhờ vậy lỡ tay xoá vẫn khôi phục được, và đơn hàng cũ vẫn
 
 ### Đồng bộ Supabase
 
-Backend chạy H2 thì Hibernate tự tạo bảng. Muốn Supabase có đúng schema này
-(kể cả `vat_tu`, `nha_cung_cap`, `mau_sac`, `ma_otp` — hiện Supabase còn thiếu),
-chạy `SUPABASE-DONG-BO.sql` trong Supabase SQL Editor.
+Schema do file `SUPABASE-DONG-BO.sql` quản lý — mở Supabase → SQL Editor →
+dán cả file → Run. Chạy lại bao nhiêu lần cũng được.
+
+`ddl-auto=none`: Java **không** tự sửa schema. Đã thử để `update` và nó hỏng —
+Hibernate so kiểu cột rất thô, nó đòi sửa 40 cột của Supabase (`text` thành
+`varchar(255)` làm cụt mô tả sản phẩm, `numeric` thành `bigint`), riêng
+`don_hang_chi_tiet.don_gia` có cột `thanh_tien` GENERATED tính từ nó nên
+Postgres từ chối, Hikari đánh dấu kết nối hỏng, cả app chết lúc khởi động.
+
+Bù lại, lúc khởi động app tự soát 10 bảng + các cột bắt buộc. Thiếu gì thì
+dừng ngay kèm danh sách cụ thể và nhắc chạy `SUPABASE-DONG-BO.sql`, thay vì
+để trang quản trị lỗi 500 rồi mới đi mò.
 
 ### Lưu ảnh
 
@@ -119,22 +129,10 @@ Trang admin hiển thị nguồn dữ liệu đang dùng ngay trên tiêu đề 
    **Bắt buộc dùng host pooler** (`aws-1-<region>.pooler.supabase.com`) vì hỗ trợ IPv4 —
    host trực tiếp `db.<ref>.supabase.co` chỉ có IPv6, sẽ bị lỗi `Connect timed out`
    (hiện ra dưới dạng "Unable to determine Dialect without JDBC metadata").
-3. Đặt 3 biến môi trường rồi chạy:
+3. Chạy như bình thường — `application.properties` đã bật sẵn profile `supabase`:
 
-**PowerShell:**
 ```powershell
-$env:SUPABASE_JDBC_URL    = "jdbc:postgresql://aws-1-<region>.pooler.supabase.com:5432/postgres"
-$env:SUPABASE_DB_USER     = "postgres.nmptxzbtngztzxpwdprs"
-$env:SUPABASE_DB_PASSWORD = "mat-khau-database"
-java -jar target\in3d-backend-1.0.0.jar --spring.profiles.active=supabase
-```
-
-**CMD:**
-```bat
-set SUPABASE_JDBC_URL=jdbc:postgresql://aws-1-<region>.pooler.supabase.com:5432/postgres
-set SUPABASE_DB_USER=postgres.nmptxzbtngztzxpwdprs
-set SUPABASE_DB_PASSWORD=mat-khau-database
-java -jar target\in3d-backend-1.0.0.jar --spring.profiles.active=supabase
+java -jar target\in3d-backend-1.0.0.jar
 ```
 
 Khi khởi động, backend **tự kiểm tra kết nối** và in thông báo tiếng Việt:
@@ -142,7 +140,10 @@ Khi khởi động, backend **tự kiểm tra kết nối** và in thông báo t
 - Kết nối thất bại → in nguyên nhân gốc + 5 bước kiểm tra (host pooler, user có đuôi project, mật khẩu, project bị paused, tường lửa).
 - Thành công → `[IN3D] ✔ Kết nối Supabase PostgreSQL thành công`.
 
-Entity Java ánh xạ **đúng tên bảng/cột** của schema Supabase (`don_hang`, `san_pham`, `thanh_toan`...) nên không cần sửa code — chỉ đổi profile.
+- Schema thiếu bảng/cột → in danh sách thiếu + nhắc chạy `SUPABASE-DONG-BO.sql`.
+
+Entity Java ánh xạ **đúng tên bảng/cột** của schema Supabase
+(`don_hang`, `san_pham`, `thanh_toan`...).
 
 > Lưu ý: kết nối JDBC bằng user `postgres` bỏ qua RLS (toàn quyền), vì vậy khi triển khai thật hãy giữ backend Java trong server riêng và thêm xác thực (JWT/Spring Security) cho các endpoint admin — hiện tại API đang mở cho môi trường phát triển.
 
