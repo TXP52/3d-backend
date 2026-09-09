@@ -6,17 +6,22 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.entity.MauSac;
-import vn.in3d.backend.entity.NhaCungCap;
-import vn.in3d.backend.entity.VatTu;
 import vn.in3d.backend.repository.NguoiDungRepository;
 import vn.in3d.backend.repository.MauSacRepository;
-import vn.in3d.backend.repository.NhaCungCapRepository;
-import vn.in3d.backend.repository.VatTuRepository;
 
 import java.util.List;
 
 /**
- * Nạp dữ liệu ban đầu: tài khoản quản trị, nhà cung cấp, kho vật tư, sản phẩm mẫu.
+ * Nạp dữ liệu ban đầu: CHỈ tài khoản quản trị và bảng màu.
+ *
+ * Trước đây nạp thêm 1 nhà cung cấp "Shopee", 7 vật tư (1 máy in + 6 cuộn nhựa)
+ * và 5 sản phẩm mẫu. Đó là hàng bịa để trang không trống lúc mới dựng, nhưng
+ * chủ shop nhìn vào tưởng kho có thật, lại còn tính vào tiền vốn.
+ * Giờ chỉ giữ hai thứ thật sự cần để đăng nhập và dùng được ngay:
+ *   - tài khoản quản trị
+ *   - bảng màu (12 màu nhựa phổ thông, chỉ là danh mục để chọn, không phải hàng)
+ * Vật tư, nhà cung cấp, sản phẩm: chủ shop tự nhập.
+ *
  * Chạy ở MỌI profile nhưng chỉ thêm khi bảng còn trống nên an toàn với dữ liệu thật.
  */
 @Configuration
@@ -27,14 +32,10 @@ public class DataSeeder {
 
     @Bean
     CommandLineRunner napDuLieuBanDau(NguoiDungRepository nguoiDungRepo,
-                                      NhaCungCapRepository nccRepo,
-                                      VatTuRepository vatTuRepo,
                                       MauSacRepository mauSacRepo) {
         return args -> {
             napAdmin(nguoiDungRepo);
             napMauSac(mauSacRepo);
-            Long shopeeId = napNhaCungCap(nccRepo);
-            napVatTu(vatTuRepo, shopeeId);
         };
     }
 
@@ -98,56 +99,6 @@ public class DataSeeder {
             System.out.println("[IN3D] Đã cập nhật tài khoản quản trị " + ADMIN_EMAIL
                     + (doiVaiTro ? " (nâng quyền admin)" : "") + (doiMatKhau ? " (đặt lại mật khẩu)" : ""));
         }
-    }
-
-    private Long napNhaCungCap(NhaCungCapRepository repo) {
-        return repo.findByTenIgnoreCase("Shopee").map(NhaCungCap::getId).orElseGet(() -> {
-            NhaCungCap shopee = new NhaCungCap();
-            shopee.setTen("Shopee");
-            shopee.setLienHe("https://shopee.vn");
-            shopee.setGhiChu("Nơi mua nhựa in 3D (PLA, PETG)");
-            return repo.save(shopee).getId();
-        });
-    }
-
-    /** Kho vật tư ban đầu: 1 máy in + 2 cuộn PETG + 4 cuộn PLA. */
-    private void napVatTu(VatTuRepository repo, Long shopeeId) {
-        if (repo.count() > 0) return;
-
-        VatTu may = new VatTu();
-        may.setTen("Máy in 3D Bambu Lab A1");
-        may.setLoai("may_in");
-        may.setGia(10_900_000L);
-        may.setSoLuong(1);
-        may.setKhoiLuongGram(0);
-        repo.save(may);
-
-        // 2 cuộn PETG: 300.000đ cho cả 2 cuộn -> 150.000đ/cuộn, mỗi cuộn 1kg
-        for (String mau : List.of("Đỏ", "Vàng")) {
-            VatTu petg = new VatTu();
-            petg.setTen("Nhựa PETG 1.75mm (1kg)");
-            petg.setLoai("nhua");
-            petg.setMau(mau);
-            petg.setGia(150_000L);
-            petg.setSoLuong(1);
-            petg.setKhoiLuongGram(1000);
-            petg.setNhaCungCapId(shopeeId);
-            repo.save(petg);
-        }
-
-        // 4 cuộn PLA: 222.000đ/cuộn, mỗi cuộn 1kg
-        for (String mau : List.of("Đen", "Trắng", "Be", "Xám")) {
-            VatTu pla = new VatTu();
-            pla.setTen("Nhựa PLA 1.75mm (1kg)");
-            pla.setLoai("nhua");
-            pla.setMau(mau);
-            pla.setGia(222_000L);
-            pla.setSoLuong(1);
-            pla.setKhoiLuongGram(1000);
-            pla.setNhaCungCapId(shopeeId);
-            repo.save(pla);
-        }
-        System.out.println("[IN3D] Đã nạp kho vật tư: 1 máy in + 2 cuộn PETG + 4 cuộn PLA");
     }
 
 }
