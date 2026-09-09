@@ -20,7 +20,7 @@ import java.util.UUID;
 /**
  * API tải ảnh — LƯU MIỄN PHÍ ngay trên ổ đĩa máy chạy backend.
  *
- * Ảnh nằm ở thư mục ./data/anh (đổi bằng thuộc tính in3d.thu-muc-anh),
+ * Ảnh nằm ở thư mục của trang quản trị ../3d/public/anh (đổi bằng thuộc tính in3d.thu-muc-anh),
  * được phục vụ công khai tại /anh/<tên-file> (xem TaiNguyenAnhConfig).
  *
  * Khi nào cần chuyển sang Supabase Storage / CDN: đọc HUONG-DAN-LUU-ANH.md.
@@ -35,9 +35,11 @@ public class AnhController {
 
     private final Path thuMuc;
 
-    public AnhController(@Value("${in3d.thu-muc-anh:./data/anh}") String duongDan) throws IOException {
+    public AnhController(@Value("${in3d.thu-muc-anh:../3d/public/anh}") String duongDan) throws IOException {
         this.thuMuc = Paths.get(duongDan).toAbsolutePath().normalize();
         Files.createDirectories(this.thuMuc);
+        // In ra để biết ngay ảnh đang rơi vào đâu — đường dẫn tương đối phụ thuộc thư mục chạy backend
+        System.out.println("[IN3D] Ảnh tải lên lưu tại: " + this.thuMuc);
     }
 
     /** Tải 1 ảnh lên, trả về URL công khai để lưu vào san_pham.hinh_anh / vat_tu.hinh_anh. */

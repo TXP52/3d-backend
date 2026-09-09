@@ -1,13 +1,18 @@
 package vn.in3d.backend.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import vn.in3d.backend.entity.NguoiDung;
+import vn.in3d.backend.entity.DanhMuc;
 import vn.in3d.backend.entity.MauSac;
+import vn.in3d.backend.entity.VatTu;
 import vn.in3d.backend.repository.NguoiDungRepository;
+import vn.in3d.backend.repository.DanhMucRepository;
 import vn.in3d.backend.repository.MauSacRepository;
+import vn.in3d.backend.repository.VatTuRepository;
 
 import java.util.List;
 
@@ -20,23 +25,81 @@ import java.util.List;
  * Giờ chỉ giữ hai thứ thật sự cần để đăng nhập và dùng được ngay:
  *   - tài khoản quản trị
  *   - bảng màu (12 màu nhựa phổ thông, chỉ là danh mục để chọn, không phải hàng)
+ *   - 4 loại vật tư cơ bản (Máy in / Nhựa in / Phụ kiện / Khác) — chính là danh sách
+ *     trước đây viết cứng ở ô "Loại" trang Kho, giờ nằm trong bảng danh_muc để sửa được
  * Vật tư, nhà cung cấp, sản phẩm: chủ shop tự nhập.
  *
- * Chạy ở MỌI profile nhưng chỉ thêm khi bảng còn trống nên an toàn với dữ liệu thật.
+ * Kèm một việc kiểm soát: chỉ ĐÚNG MỘT email (in3d.admin.email) được mang vai trò
+ * admin. Tài khoản nào khác lỡ là admin (người đầu tiên đăng ký ở website bán hàng
+ * từng tự động thành admin) bị hạ về khách hàng — trang quản trị chỉ mở cho một người.
+ *
+ * Chỉ thêm khi bảng còn trống nên an toàn với dữ liệu thật.
  */
 @Configuration
 public class DataSeeder {
 
-    private static final String ADMIN_EMAIL = "txp5201aquarius@gmail.com";
     private static final String ADMIN_MAT_KHAU = "txP12345678@";
+
+    /** Email quản trị DUY NHẤT — đổi bằng in3d.admin.email trong application.properties. */
+    private final String adminEmail;
+
+    public DataSeeder(@Value("${in3d.admin.email:txp5201aquarius@gmail.com}") String adminEmail) {
+        this.adminEmail = adminEmail.trim().toLowerCase();
+    }
 
     @Bean
     CommandLineRunner napDuLieuBanDau(NguoiDungRepository nguoiDungRepo,
-                                      MauSacRepository mauSacRepo) {
+                                      MauSacRepository mauSacRepo,
+                                      DanhMucRepository danhMucRepo,
+                                      VatTuRepository vatTuRepo) {
         return args -> {
             napAdmin(nguoiDungRepo);
             napMauSac(mauSacRepo);
+            napLoaiVatTu(danhMucRepo, vatTuRepo);
         };
+    }
+
+    /**
+     * Bốn loại vật tư cơ bản cho ô "Loại" ở trang Kho. Đây là CẤU HÌNH (danh sách
+     * chọn) chứ không phải hàng hoá mẫu; chỉ nạp khi nhóm vat_tu còn trống, xoá đi
+     * trong trang Danh mục thì lần khởi động sau cũng không mọc lại chừng nào còn
+     * ít nhất một loại. Sau đó nối vật tư cũ (chỉ có cột loai) sang loại tương ứng.
+     */
+    private void napLoaiVatTu(DanhMucRepository repo, VatTuRepository vatTuRepo) {
+        if (repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu").isEmpty()) {
+            record L(String ten, String tinhChat, String icon, int thuTu) {}
+            List<L> ds = List.of(
+                    new L("Máy in",   "may_in",   "fa-print",              1),
+                    new L("Nhựa in",  "nhua",     "fa-record-vinyl",       2),
+                    new L("Phụ kiện", "phu_kien", "fa-screwdriver-wrench", 3),
+                    new L("Khác",     "khac",     "fa-box",                4));
+            for (L l : ds) {
+                DanhMuc d = new DanhMuc();
+                d.setTen(l.ten());
+                d.setNhom("vat_tu");
+                d.setTinhChat(l.tinhChat());
+                d.setIcon(l.icon());
+                d.setThuTu(l.thuTu());
+                repo.save(d);
+            }
+            System.out.println("[IN3D] Đã nạp " + ds.size() + " loại vật tư cơ bản vào bảng danh mục");
+        }
+
+        List<DanhMuc> loai = repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu");
+        int daNoi = 0;
+        for (VatTu v : vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc()) {
+            if (v.getDanhMucId() != null) continue;
+            String tc = v.getLoai() == null ? "khac" : v.getLoai();
+            DanhMuc khop = loai.stream()
+                    .filter(d -> tc.equals(d.getTinhChat()))
+                    .findFirst().orElse(null);
+            if (khop != null) {
+                v.setDanhMucId(khop.getId());
+                vatTuRepo.save(v);
+                daNoi++;
+            }
+        }
+        if (daNoi > 0) System.out.println("[IN3D] Đã nối loại cho " + daNoi + " vật tư cũ");
     }
 
     /** Bộ màu nhựa đang dùng trong kho + vài màu phổ biến. */
@@ -76,18 +139,20 @@ public class DataSeeder {
         if ("false".equalsIgnoreCase(System.getenv("IN3D_TU_TAO_ADMIN"))) return;
 
         BCryptPasswordEncoder maHoa = new BCryptPasswordEncoder();
-        var hienCo = repo.findByEmailIgnoreCase(ADMIN_EMAIL);
+        var hienCo = repo.findByEmailIgnoreCase(adminEmail);
 
         if (hienCo.isEmpty()) {
             NguoiDung admin = new NguoiDung();
             admin.setHoTen("Trương Xuân Phương");
-            admin.setEmail(ADMIN_EMAIL);
+            admin.setEmail(adminEmail);
             admin.setMatKhauHash(maHoa.encode(ADMIN_MAT_KHAU));
             admin.setVaiTro("admin");
             repo.save(admin);
-            System.out.println("[IN3D] Đã tạo tài khoản quản trị: " + ADMIN_EMAIL);
+            System.out.println("[IN3D] Đã tạo tài khoản quản trị: " + adminEmail);
+            chiMotAdmin(repo);
             return;
         }
+        chiMotAdmin(repo);
 
         NguoiDung nd = hienCo.get();
         boolean doiVaiTro = !"admin".equals(nd.getVaiTro());
@@ -96,9 +161,26 @@ public class DataSeeder {
             nd.setVaiTro("admin");
             nd.setMatKhauHash(maHoa.encode(ADMIN_MAT_KHAU));
             repo.save(nd);
-            System.out.println("[IN3D] Đã cập nhật tài khoản quản trị " + ADMIN_EMAIL
+            System.out.println("[IN3D] Đã cập nhật tài khoản quản trị " + adminEmail
                     + (doiVaiTro ? " (nâng quyền admin)" : "") + (doiMatKhau ? " (đặt lại mật khẩu)" : ""));
         }
+    }
+
+    /**
+     * Chỉ ĐÚNG MỘT email được quyền quản trị. Mọi tài khoản khác lỡ mang vai trò
+     * admin bị hạ về khách hàng — XacThucService cũng chặn ở bước đăng nhập,
+     * nhưng dọn ở đây thì danh sách người dùng không còn hiện hai "Quản trị".
+     */
+    private void chiMotAdmin(NguoiDungRepository repo) {
+        repo.findByDaXoaFalseOrderByIdAsc().stream()
+                .filter(nd -> "admin".equals(nd.getVaiTro()))
+                .filter(nd -> !adminEmail.equalsIgnoreCase(nd.getEmail()))
+                .forEach(nd -> {
+                    nd.setVaiTro("khach_hang");
+                    repo.save(nd);
+                    System.out.println("[IN3D] Hạ quyền admin của " + nd.getEmail()
+                            + " — chỉ " + adminEmail + " được vào trang quản trị.");
+                });
     }
 
 }

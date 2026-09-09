@@ -19,7 +19,7 @@ import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Phục vụ ảnh đã tải lên tại /anh/** — đọc thẳng từ thư mục ./data/anh trên ổ đĩa.
+ * Phục vụ ảnh đã tải lên tại /anh/** — đọc từ thư mục của trang quản trị ../3d/public/anh.
  * Nhờ vậy lưu ảnh KHÔNG TỐN TIỀN, không phụ thuộc dịch vụ ngoài.
  */
 @Configuration
@@ -27,7 +27,7 @@ public class TaiNguyenAnhConfig implements WebMvcConfigurer {
 
     private final String thuMucAnh;
 
-    public TaiNguyenAnhConfig(@Value("${in3d.thu-muc-anh:./data/anh}") String thuMucAnh) {
+    public TaiNguyenAnhConfig(@Value("${in3d.thu-muc-anh:../3d/public/anh}") String thuMucAnh) {
         this.thuMucAnh = thuMucAnh;
     }
 

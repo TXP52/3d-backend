@@ -45,12 +45,12 @@ public class VatTu extends BanGhi {
     private Integer daDungGram = 0;
 
     /**
-     * Trạng thái vật tư: da_dat | dang_van_chuyen | thanh_cong | het_hang
-     * (thanh_cong = đã nhận hàng và đang dùng được)
+     * Trạng thái vật tư: con_hang | sap_het | het_hang | da_dat | dang_van_chuyen
+     * (da_dat / dang_van_chuyen = đã mua nhưng hàng chưa về tới kho)
      */
     @Column(name = "trang_thai", nullable = false,
-            columnDefinition = "varchar(40) default 'thanh_cong' not null")
-    private String trangThai = "thanh_cong";
+            columnDefinition = "varchar(40) default 'con_hang' not null")
+    private String trangThai = "con_hang";
 
     /** Ảnh vật tư (URL do API /api/anh trả về hoặc link ngoài) */
     @Column(name = "hinh_anh")
@@ -58,6 +58,13 @@ public class VatTu extends BanGhi {
 
     @Column(name = "nha_cung_cap_id")
     private Long nhaCungCapId;
+
+    /**
+     * Loại vật tư — trỏ sang danh_muc (nhom = vat_tu). Cột loai được chép từ
+     * tinh_chat của loại đó nên mọi chỗ tính toán cũ vẫn chạy với loai.
+     */
+    @Column(name = "danh_muc_id")
+    private Long danhMucId;
 
     @Column(name = "ghi_chu", columnDefinition = "text")
     private String ghiChu;
@@ -88,6 +95,28 @@ public class VatTu extends BanGhi {
         return Math.max(0, tong - (daDungGram == null ? 0 : daDungGram));
     }
 
+    /** Cuộn nhựa còn từ 200g trở xuống được coi là SẮP HẾT. */
+    public static final int NGUONG_NHUA_SAP_HET = 200;
+
+    /**
+     * Trạng thái THỰC TẾ để hiển thị.
+     *
+     * Với nhựa, còn hàng / sắp hết / hết hàng suy thẳng từ số gram còn lại — bắt
+     * chủ shop sửa tay sau mỗi lần in thì bảng kho chỉ đúng được vài hôm.
+     * Hàng chưa về kho (đã đặt, đang vận chuyển) và hàng tự đánh dấu hết
+     * thì giữ nguyên, không suy diễn đè lên.
+     */
+    @Transient
+    public String getTrangThaiTinh() {
+        String tt = trangThai == null || trangThai.isBlank() ? "con_hang" : trangThai;
+        if ("da_dat".equals(tt) || "dang_van_chuyen".equals(tt) || "het_hang".equals(tt)) return tt;
+        if (!"nhua".equals(loai)) return tt;
+        int con = getConLaiGram();
+        if (con <= 0) return "het_hang";
+        if (con <= NGUONG_NHUA_SAP_HET) return "sap_het";
+        return "con_hang";
+    }
+
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
     public String getTen() { return ten; }
@@ -112,6 +141,8 @@ public class VatTu extends BanGhi {
     public void setHinhAnh(String hinhAnh) { this.hinhAnh = hinhAnh; }
     public Long getNhaCungCapId() { return nhaCungCapId; }
     public void setNhaCungCapId(Long nhaCungCapId) { this.nhaCungCapId = nhaCungCapId; }
+    public Long getDanhMucId() { return danhMucId; }
+    public void setDanhMucId(Long danhMucId) { this.danhMucId = danhMucId; }
     public String getGhiChu() { return ghiChu; }
     public void setGhiChu(String ghiChu) { this.ghiChu = ghiChu; }
 }

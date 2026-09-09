@@ -5,9 +5,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
  * Backend Java cho hệ thống bán hàng IN3D Shop.
- * - Profile mặc định: chạy với H2 (file local) để thử nghiệm ngay.
- * - Profile "supabase": kết nối PostgreSQL của Supabase (database dùng chung
- *   với website bán hàng và trang quản trị).
+ * Database duy nhất là PostgreSQL của Supabase (dùng chung với website bán hàng
+ * và trang quản trị); profile "supabase" được bật sẵn trong application.properties,
+ * thông tin kết nối nằm ở application-supabase.properties. Không còn H2.
  */
 @SpringBootApplication
 public class In3dBackendApplication {

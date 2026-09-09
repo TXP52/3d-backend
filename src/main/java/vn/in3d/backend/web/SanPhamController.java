@@ -1,6 +1,7 @@
 package vn.in3d.backend.web;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.entity.SanPham;
@@ -24,9 +25,12 @@ public class SanPhamController {
     private static final Set<String> LOAI_SAN_PHAM = Set.of("ban", "mau", "dich_vu");
 
     private final SanPhamRepository sanPhamRepo;
+    private final vn.in3d.backend.repository.DanhMucRepository danhMucRepo;
 
-    public SanPhamController(SanPhamRepository sanPhamRepo) {
+    public SanPhamController(SanPhamRepository sanPhamRepo,
+                             vn.in3d.backend.repository.DanhMucRepository danhMucRepo) {
         this.sanPhamRepo = sanPhamRepo;
+        this.danhMucRepo = danhMucRepo;
     }
 
     /** Kiểm tra backend còn sống — frontend gọi để quyết định dùng Java API hay Supabase. */
@@ -44,6 +48,7 @@ public class SanPhamController {
 
     /** Thêm sản phẩm mới (admin). */
     @PostMapping("/san-pham")
+    @Transactional
     public SanPham them(@RequestBody SanPham sp) {
         sp.setId(null);
         if (sp.getTen() == null || sp.getTen().isBlank()) {
@@ -51,12 +56,16 @@ public class SanPhamController {
         }
         kiemTraTrangThai(sp.getTrangThai());
         kiemTraLoai(sp.getLoaiSanPham());
+        if (sp.getDanhMucId() != null && !danhMucRepo.existsById(sp.getDanhMucId())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Danh mục không tồn tại.");
+        }
         if (sp.getGiaChu() == null || sp.getGiaChu().isBlank()) sp.setGiaChu(dinhDangGia(sp.getGia()));
         return sanPhamRepo.save(sp);
     }
 
     /** Cập nhật tên / mô tả / ảnh / giá / tồn kho / ẩn-hiện / trạng thái (admin). */
     @PutMapping("/san-pham/{id}")
+    @Transactional
     public SanPham capNhat(@PathVariable Long id, @RequestBody Map<String, Object> thayDoi) {
         SanPham sp = sanPhamRepo.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm."));
@@ -77,6 +86,19 @@ public class SanPhamController {
         }
         if (thayDoi.containsKey("dangBan")) {
             sp.setDangBan(Boolean.parseBoolean(String.valueOf(thayDoi.get("dangBan"))));
+        }
+        if (thayDoi.containsKey("danhMucId")) {
+            Object v = thayDoi.get("danhMucId");
+            String chuoi = v == null ? "" : String.valueOf(v).trim();
+            if (chuoi.isEmpty() || "null".equals(chuoi)) {
+                sp.setDanhMucId(null);           // gỡ khỏi danh mục -> chưa phân loại
+            } else {
+                Long dmId = Long.parseLong(chuoi);
+                if (!danhMucRepo.existsById(dmId)) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Danh mục không tồn tại.");
+                }
+                sp.setDanhMucId(dmId);
+            }
         }
         if (thayDoi.containsKey("loaiSanPham")) {
             String l = String.valueOf(thayDoi.get("loaiSanPham"));

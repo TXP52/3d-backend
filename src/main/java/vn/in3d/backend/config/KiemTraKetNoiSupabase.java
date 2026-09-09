@@ -33,19 +33,23 @@ import java.util.Map;
 public class KiemTraKetNoiSupabase {
 
     /** Bảng -> cột bắt buộc phải có. Thiếu là chưa chạy SUPABASE-DONG-BO.sql bản mới. */
-    private static final Map<String, List<String>> CAN_CO = Map.of(
-            "nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted"),
-            "san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham", "is_deleted"),
-            "don_hang",          List.of("id", "ma_don", "tong_tien", "ma_khuyen_mai", "tien_giam",
-                                         "tien_giam_san_pham", "nguoi_dung_id", "is_deleted"),
-            "don_hang_chi_tiet", List.of("id", "don_hang_id", "don_gia", "don_gia_goc", "so_luong"),
-            "thanh_toan",        List.of("id", "don_hang_id", "so_tien", "trang_thai"),
-            "khuyen_mai",        List.of("id", "ma", "kieu_ap_dung", "chi_khach_moi",
-                                         "dieu_kien_dia_chi", "san_pham_ids", "is_deleted"),
-            "bai_viet",          List.of("id", "tieu_de", "duong_dan", "chuyen_muc", "is_deleted"),
-            "mau_sac",           List.of("id", "ten", "ma_mau", "is_deleted"),
-            "vat_tu",            List.of("id", "ten", "loai", "gia", "trang_thai", "is_deleted"),
-            "nha_cung_cap",      List.of("id", "ten", "is_deleted"));
+    // Map.ofEntries vì Map.of chỉ nhận tối đa 10 cặp
+    private static final Map<String, List<String>> CAN_CO = Map.ofEntries(
+            Map.entry("nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted")),
+            Map.entry("san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham",
+                                                   "danh_muc_id", "is_deleted")),
+            Map.entry("danh_muc",          List.of("id", "ten", "nhom", "thu_tu", "dang_hien", "is_deleted")),
+            Map.entry("don_hang",          List.of("id", "ma_don", "tong_tien", "ma_khuyen_mai", "tien_giam",
+                                                   "tien_giam_san_pham", "nguoi_dung_id", "is_deleted")),
+            Map.entry("don_hang_chi_tiet", List.of("id", "don_hang_id", "don_gia", "don_gia_goc", "so_luong")),
+            Map.entry("thanh_toan",        List.of("id", "don_hang_id", "so_tien", "trang_thai")),
+            Map.entry("khuyen_mai",        List.of("id", "ma", "kieu_ap_dung", "chi_khach_moi",
+                                                   "dieu_kien_dia_chi", "san_pham_ids", "is_deleted")),
+            Map.entry("bai_viet",          List.of("id", "tieu_de", "duong_dan", "chuyen_muc", "is_deleted")),
+            Map.entry("mau_sac",           List.of("id", "ten", "ma_mau", "is_deleted")),
+            Map.entry("vat_tu",            List.of("id", "ten", "loai", "gia", "trang_thai", "mau_sac_id",
+                                                   "danh_muc_id", "is_deleted")),
+            Map.entry("nha_cung_cap",      List.of("id", "ten", "is_deleted")));
 
     // Order thấp nhất: chạy trước mọi seeder, seeder không nên ghi vào schema hỏng
     @Bean

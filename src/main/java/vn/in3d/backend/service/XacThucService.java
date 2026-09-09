@@ -39,15 +39,19 @@ public class XacThucService {
     private final BCryptPasswordEncoder maHoa = new BCryptPasswordEncoder();
     private final SecureRandom random = new SecureRandom();
     private final String secret;
+    /** Email DUY NHẤT được vào trang quản trị. */
+    private final String adminEmail;
 
     public XacThucService(NguoiDungRepository nguoiDungRepo,
                           MaOtpRepository maOtpRepo,
                           EmailService emailService,
-                          @Value("${in3d.auth.secret:doi-secret-nay-khi-len-production}") String secret) {
+                          @Value("${in3d.auth.secret:doi-secret-nay-khi-len-production}") String secret,
+                          @Value("${in3d.admin.email:txp5201aquarius@gmail.com}") String adminEmail) {
         this.nguoiDungRepo = nguoiDungRepo;
         this.maOtpRepo = maOtpRepo;
         this.emailService = emailService;
         this.secret = secret;
+        this.adminEmail = adminEmail.trim().toLowerCase();
     }
 
     /** Đăng ký. Người dùng ĐẦU TIÊN của hệ thống tự động là admin. */
@@ -84,7 +88,10 @@ public class XacThucService {
      */
     @Transactional
     public Map<String, Object> guiOtpDangNhapAdmin(String email, String matKhau) {
+        // Chặn TRƯỚC khi kiểm tra mật khẩu: email khác thì không cần dò mật khẩu làm gì.
+        kiemTraLaAdminDuyNhat(email);
         NguoiDung nd = kiemTraMatKhau(email, matKhau);
+        kiemTraLaAdminDuyNhat(nd.getEmail());
         if (!"admin".equals(nd.getVaiTro())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Tài khoản này không có quyền quản trị. Chỉ tài khoản admin mới đăng nhập được trang quản trị.");
@@ -111,10 +118,24 @@ public class XacThucService {
         );
     }
 
+    /**
+     * Chỉ một email duy nhất được vào trang quản trị.
+     * Trước đây bất kỳ tài khoản nào mang vai trò admin cũng vào được — mà người
+     * ĐẦU TIÊN đăng ký ở website bán hàng lại tự động thành admin.
+     */
+    private void kiemTraLaAdminDuyNhat(String email) {
+        String mail = email == null ? "" : email.trim();
+        if (!adminEmail.equalsIgnoreCase(mail)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Email này không được phép vào trang quản trị. Hệ thống chỉ mở cho đúng một tài khoản quản trị.");
+        }
+    }
+
     /** BƯỚC 2 đăng nhập QUẢN TRỊ: xác thực mã OTP, đúng thì phát token. */
     @Transactional
     public Map<String, Object> xacThucOtp(String email, String ma) {
         String mail = email == null ? "" : email.trim();
+        kiemTraLaAdminDuyNhat(mail);
         MaOtp otp = maOtpRepo.findFirstByEmailIgnoreCaseAndDaDungFalseOrderByIdDesc(mail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Chưa có mã xác thực nào. Hãy đăng nhập lại để nhận mã mới."));
