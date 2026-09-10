@@ -38,6 +38,9 @@ public class KiemTraKetNoiSupabase {
             Map.entry("nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted")),
             Map.entry("san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham",
                                                    "danh_muc_id", "is_deleted")),
+            // Bảng nối: mỗi dòng là "in mấy cái bằng cuộn nhựa nào"
+            Map.entry("san_pham_vat_tu",   List.of("id", "san_pham_id", "vat_tu_id",
+                                                   "so_luong", "gram_nhua", "gram_thua")),
             Map.entry("danh_muc",          List.of("id", "ten", "nhom", "thu_tu", "dang_hien", "is_deleted")),
             Map.entry("don_hang",          List.of("id", "ma_don", "tong_tien", "ma_khuyen_mai", "tien_giam",
                                                    "tien_giam_san_pham", "nguoi_dung_id", "is_deleted")),

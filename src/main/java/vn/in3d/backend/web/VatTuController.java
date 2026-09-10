@@ -57,9 +57,8 @@ public class VatTuController {
     public List<Map<String, Object>> danhSach() {
         return vatTuRepo.danhSachKemTen().stream().map(dong -> {
             VatTu v = (VatTu) dong[0];
-            String maMauTheoId = (String) dong[1];
-            String maMauTheoTen = (String) dong[2];
-            String maMau = maMauTheoId != null && !maMauTheoId.isBlank() ? maMauTheoId : maMauTheoTen;
+            String maMau = (String) dong[1];
+            String tenMau = (String) dong[2];
 
             Map<String, Object> m = new java.util.LinkedHashMap<>();
             m.put("id", v.getId());
@@ -67,9 +66,9 @@ public class VatTuController {
             m.put("loai", v.getLoai());
             m.put("danhMucId", v.getDanhMucId());
             m.put("danhMuc", dong[4]);
-            m.put("mau", v.getMau());
+            // Màu chỉ có một nguồn: bảng mau_sac, tra theo mau_sac_id
+            m.put("mau", tenMau);
             m.put("mauSacId", v.getMauSacId());
-            // Mã màu: theo id đã trỏ; bản ghi cũ chỉ có TÊN màu thì tra theo tên
             m.put("maMau", maMau);
             m.put("gia", v.getGia());
             m.put("soLuong", v.getSoLuong());
@@ -86,6 +85,10 @@ public class VatTuController {
             m.put("donGiaMoiGram", v.getDonGiaMoiGram());
             m.put("tienDaDung", v.getTienDaDung());
             m.put("conLaiGram", v.getConLaiGram());
+            // Đã dùng / còn lại theo đơn vị riêng: nhựa "g", máy in & dụng cụ "cái"
+            m.put("donVi", v.getDonVi());
+            m.put("tongCoThe", v.getTongCoThe());
+            m.put("conLai", v.getConLai());
             m.put("nhaCungCap", dong[3]);
             m.put("createdAt", v.getCreatedAt());
             m.put("updatedAt", v.getUpdatedAt());
@@ -103,19 +106,20 @@ public class VatTuController {
         kiemTraTrangThai(vt.getTrangThai());
         if (vt.getTrangThai() == null) vt.setTrangThai("con_hang");
         apDungDanhMuc(vt);
-        if (vt.getMauSacId() != null) {
-            mauSacRepo.findById(vt.getMauSacId()).ifPresent(ms -> vt.setMau(ms.getTen()));
+        if (vt.getMauSacId() != null && !mauSacRepo.existsById(vt.getMauSacId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "Màu không tồn tại trong bảng màu.");
         }
         return vatTuRepo.save(vt);
     }
 
-    /** Cập nhật: gia, soLuong, daDungGram, khoiLuongGram, mau, ten, trangThai, hinhAnh, nhaCungCapId, ghiChu. */
+    /** Cập nhật: gia, soLuong, daDungGram, khoiLuongGram, mauSacId, ten, trangThai, hinhAnh, nhaCungCapId, ghiChu. */
     @PutMapping("/vat-tu/{id}")
     @Transactional
     public VatTu capNhat(@PathVariable Long id, @RequestBody Map<String, Object> td) {
         VatTu vt = vatTuRepo.findById(id).orElseThrow();
         if (td.containsKey("ten")) vt.setTen(String.valueOf(td.get("ten")));
-        if (td.containsKey("mau")) vt.setMau(String.valueOf(td.get("mau")));
+        // Không nhận "mau" dạng chữ nữa — màu đặt bằng mauSacId, trỏ sang bảng mau_sac
         if (td.containsKey("loai")) vt.setLoai(String.valueOf(td.get("loai")));
         if (td.containsKey("ghiChu")) vt.setGhiChu(String.valueOf(td.get("ghiChu")));
         if (td.containsKey("hinhAnh")) {
@@ -137,9 +141,11 @@ public class VatTuController {
                 vt.setMauSacId(null);
             } else {
                 Long mid = so(v);
+                if (!mauSacRepo.existsById(mid)) {
+                    throw new org.springframework.web.server.ResponseStatusException(
+                            HttpStatus.BAD_REQUEST, "Màu không tồn tại trong bảng màu.");
+                }
                 vt.setMauSacId(mid);
-                // Chép tên màu sang cột mau để danh sách cũ vẫn đọc được
-                mauSacRepo.findById(mid).ifPresent(ms -> vt.setMau(ms.getTen()));
             }
         }
         if (td.containsKey("danhMucId")) {
@@ -222,7 +228,7 @@ public class VatTuController {
                     "\"" + dm.getTen() + "\" là danh mục sản phẩm, không dùng làm loại vật tư được.");
         }
         String tc = dm.getTinhChat();
-        vt.setLoai(tc != null && DanhMucController.TINH_CHAT.contains(tc) ? tc : "khac");
+        vt.setLoai(tc != null && DanhMucController.TINH_CHAT.contains(tc) ? tc : "dung_cu");
     }
 
     private void kiemTraTrangThai(String tt) {

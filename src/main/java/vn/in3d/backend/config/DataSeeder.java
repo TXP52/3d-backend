@@ -60,7 +60,7 @@ public class DataSeeder {
     }
 
     /**
-     * Bốn loại vật tư cơ bản cho ô "Loại" ở trang Kho. Đây là CẤU HÌNH (danh sách
+     * Ba loại vật tư cơ bản cho ô "Loại" ở trang Kho. Đây là CẤU HÌNH (danh sách
      * chọn) chứ không phải hàng hoá mẫu; chỉ nạp khi nhóm vat_tu còn trống, xoá đi
      * trong trang Danh mục thì lần khởi động sau cũng không mọc lại chừng nào còn
      * ít nhất một loại. Sau đó nối vật tư cũ (chỉ có cột loai) sang loại tương ứng.
@@ -71,8 +71,7 @@ public class DataSeeder {
             List<L> ds = List.of(
                     new L("Máy in",   "may_in",   "fa-print",              1),
                     new L("Nhựa in",  "nhua",     "fa-record-vinyl",       2),
-                    new L("Phụ kiện", "phu_kien", "fa-screwdriver-wrench", 3),
-                    new L("Khác",     "khac",     "fa-box",                4));
+                    new L("Dụng cụ", "dung_cu", "fa-screwdriver-wrench", 3));
             for (L l : ds) {
                 DanhMuc d = new DanhMuc();
                 d.setTen(l.ten());
@@ -89,7 +88,7 @@ public class DataSeeder {
         int daNoi = 0;
         for (VatTu v : vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc()) {
             if (v.getDanhMucId() != null) continue;
-            String tc = v.getLoai() == null ? "khac" : v.getLoai();
+            String tc = v.getLoai() == null ? "dung_cu" : v.getLoai();
             DanhMuc khop = loai.stream()
                     .filter(d -> tc.equals(d.getTinhChat()))
                     .findFirst().orElse(null);

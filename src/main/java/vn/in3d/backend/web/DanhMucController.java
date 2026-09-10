@@ -22,7 +22,7 @@ import java.util.Set;
  *   vat_tu   : loại vật tư trong kho (Máy in, Nhựa in...), thay cho danh sách
  *              trước đây viết cứng trong giao diện.
  *
- * Với nhóm vat_tu, tinh_chat (may_in | nhua | phu_kien | khac) cho backend biết
+ * Với nhóm vat_tu, tinh_chat (may_in | nhua | dung_cu) cho backend biết
  * vật tư nào là NHỰA (theo dõi gram, sắp hết) hay MÁY IN (tính vào vốn máy) —
  * chủ shop đặt tên loại tuỳ ý ("Nhựa PLA", "Nhựa PETG"), tính chất vẫn đúng.
  */
@@ -33,7 +33,7 @@ public class DanhMucController {
     public static final String NHOM_SAN_PHAM = "san_pham";
     public static final String NHOM_VAT_TU = "vat_tu";
     private static final Set<String> NHOM = Set.of(NHOM_SAN_PHAM, NHOM_VAT_TU);
-    public static final Set<String> TINH_CHAT = Set.of("may_in", "nhua", "phu_kien", "khac");
+    public static final Set<String> TINH_CHAT = Set.of("may_in", "nhua", "dung_cu");
 
     private final DanhMucRepository repo;
     private final SanPhamRepository sanPhamRepo;
@@ -177,9 +177,9 @@ public class DanhMucController {
         return repo.save(d);
     }
 
-    /** Tính chất trống -> khac; ngoài danh sách -> báo lỗi rõ. */
+    /** Tính chất trống -> dung_cu; ngoài danh sách -> báo lỗi rõ. */
     private String chuanHoaTinhChat(String tc) {
-        if (tc == null || tc.isBlank()) return "khac";
+        if (tc == null || tc.isBlank()) return "dung_cu";
         if (!TINH_CHAT.contains(tc)) {
             throw loi400("Tính chất vật tư chỉ nhận: " + String.join(", ", TINH_CHAT));
         }

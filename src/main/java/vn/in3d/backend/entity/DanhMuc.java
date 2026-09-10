@@ -7,7 +7,7 @@ import jakarta.persistence.*;
  *   san_pham : danh mục sản phẩm (móc khoá, mô hình, đồ trang trí...) — san_pham.danh_muc_id trỏ tới
  *   vat_tu   : loại vật tư trong kho (Máy in, Nhựa in, Phụ kiện...) — vat_tu.danh_muc_id trỏ tới
  *
- * Với nhóm vat_tu, tinh_chat (may_in | nhua | phu_kien | khac) là thứ backend thật sự
+ * Với nhóm vat_tu, tinh_chat (may_in | nhua | dung_cu) là thứ backend thật sự
  * dựa vào: nhựa thì theo dõi gram và báo sắp hết, máy in thì tính vào vốn máy.
  * Tên loại chủ shop đặt tuỳ ý ("Nhựa PLA", "Nhựa PETG"...), tính chất vẫn đúng.
  */
@@ -43,7 +43,7 @@ public class DanhMuc extends BanGhi {
             columnDefinition = "varchar(20) default 'san_pham' not null")
     private String nhom = "san_pham";
 
-    /** Chỉ với nhom = vat_tu: may_in | nhua | phu_kien | khac. */
+    /** Chỉ với nhom = vat_tu: may_in | nhua | dung_cu. */
     @Column(name = "tinh_chat", length = 20)
     private String tinhChat;
 

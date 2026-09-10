@@ -17,14 +17,16 @@ public class VatTu extends BanGhi {
     @Column(nullable = false)
     private String ten;
 
-    /** may_in | nhua | phu_kien | khac */
+    /** may_in | nhua | dung_cu */
     @Column(nullable = false)
-    private String loai = "khac";
+    private String loai = "dung_cu";
 
-    /** Tên màu hiển thị (giữ lại để dữ liệu cũ không mất) */
-    private String mau;
-
-    /** Trỏ sang bảng mau_sac — nguồn màu chuẩn, có kèm mã màu để vẽ ô màu */
+    /**
+     * Màu CHỈ nằm ở bảng mau_sac. Trước đây còn một cột "mau" chép tên màu ra
+     * đây (thời chưa có bảng màu) — đã bỏ vì trùng dữ liệu, sửa tên màu trong
+     * bảng màu mà cột chép này không đổi theo thì hai nơi lệch nhau.
+     * API vẫn trả trường "mau" nhưng lấy từ mau_sac.ten qua mauSacId.
+     */
     @Column(name = "mau_sac_id")
     private Long mauSacId;
 
@@ -82,13 +84,41 @@ public class VatTu extends BanGhi {
         return (double) (gia == null ? 0 : gia) / khoiLuongGram;
     }
 
-    /** Tiền nhựa đã tiêu hao = đơn giá/gram × số gram đã dùng. */
+    /**
+     * ĐƠN VỊ ĐỂ ĐẾM "đã dùng / còn lại".
+     *
+     * Nhựa đo bằng GRAM (một cuộn 1000g dùng dần), còn máy in và dụng cụ đếm
+     * bằng CÁI — 50 cái móc khoá dùng 3 cái thì còn 47, nói "còn 997g móc khoá"
+     * thì vô nghĩa. Cột da_dung_gram dùng chung cho cả hai, đơn vị tuỳ tính chất.
+     */
     @Transient
-    public long getTienDaDung() {
-        return Math.round(getDonGiaMoiGram() * (daDungGram == null ? 0 : daDungGram));
+    public boolean isLaNhua() { return "nhua".equals(loai); }
+
+    @Transient
+    public String getDonVi() { return isLaNhua() ? "g" : "cái"; }
+
+    /** Tổng sức chứa: nhựa là gram của tất cả cuộn, thứ khác là số cái đã mua. */
+    @Transient
+    public int getTongCoThe() {
+        int sl = soLuong == null ? 0 : soLuong;
+        return isLaNhua() ? (khoiLuongGram == null ? 0 : khoiLuongGram) * sl : sl;
     }
 
-    /** Số gram còn lại trong kho (tổng khối lượng tất cả đơn vị trừ phần đã dùng). */
+    /** Còn lại theo đúng đơn vị của nó. */
+    @Transient
+    public int getConLai() {
+        return Math.max(0, getTongCoThe() - (daDungGram == null ? 0 : daDungGram));
+    }
+
+    /** Tiền đã tiêu hao: nhựa tính theo gram, thứ khác theo số cái đã dùng. */
+    @Transient
+    public long getTienDaDung() {
+        int daDung = daDungGram == null ? 0 : daDungGram;
+        if (isLaNhua()) return Math.round(getDonGiaMoiGram() * daDung);
+        return (gia == null ? 0 : gia) * daDung;
+    }
+
+    /** Giữ tên cũ cho chỗ nào chỉ làm việc với nhựa (ô chọn cuộn ở trang Sản phẩm). */
     @Transient
     public int getConLaiGram() {
         int tong = (khoiLuongGram == null ? 0 : khoiLuongGram) * (soLuong == null ? 0 : soLuong);
@@ -110,10 +140,10 @@ public class VatTu extends BanGhi {
     public String getTrangThaiTinh() {
         String tt = trangThai == null || trangThai.isBlank() ? "con_hang" : trangThai;
         if ("da_dat".equals(tt) || "dang_van_chuyen".equals(tt) || "het_hang".equals(tt)) return tt;
-        if (!"nhua".equals(loai)) return tt;
-        int con = getConLaiGram();
-        if (con <= 0) return "het_hang";
-        if (con <= NGUONG_NHUA_SAP_HET) return "sap_het";
+        int con = getConLai();
+        if (con <= 0 && getTongCoThe() > 0) return "het_hang";
+        // Ngưỡng "sắp hết" chỉ áp cho nhựa: 200g. Dụng cụ đếm theo cái, hết là hết.
+        if (isLaNhua() && con <= NGUONG_NHUA_SAP_HET) return "sap_het";
         return "con_hang";
     }
 
@@ -123,8 +153,6 @@ public class VatTu extends BanGhi {
     public void setTen(String ten) { this.ten = ten; }
     public String getLoai() { return loai; }
     public void setLoai(String loai) { this.loai = loai; }
-    public String getMau() { return mau; }
-    public void setMau(String mau) { this.mau = mau; }
     public Long getMauSacId() { return mauSacId; }
     public void setMauSacId(Long mauSacId) { this.mauSacId = mauSacId; }
     public Long getGia() { return gia; }

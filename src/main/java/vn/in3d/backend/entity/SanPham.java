@@ -52,6 +52,15 @@ public class SanPham extends BanGhi {
             columnDefinition = "varchar(40) default 'san_hang' not null")
     private String trangThai = "san_hang";
 
+    /*
+     * NHỰA VÀ SỐ LƯỢNG ĐÃ IN không nằm ở đây.
+     *
+     * Một sản phẩm in được bằng NHIỀU cuộn và mỗi cuộn in ra mấy cái là khác
+     * nhau (1 cái đen, 1 cái trắng...), nên tất cả nằm ở bảng nối
+     * san_pham_vat_tu — xem entity SanPhamVatTu.
+     * Màu của sản phẩm suy từ màu của các cuộn đó, không lưu riêng.
+     */
+
     // created_at / updated_at / is_deleted nằm ở lớp cha BanGhi
 
     // Getter / Setter
