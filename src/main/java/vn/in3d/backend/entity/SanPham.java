@@ -52,12 +52,40 @@ public class SanPham extends BanGhi {
             columnDefinition = "varchar(40) default 'san_hang' not null")
     private String trangThai = "san_hang";
 
-    /*
-     * NHỰA VÀ SỐ LƯỢNG ĐÃ IN không nằm ở đây.
+    /**
+     * TỔNG SỐ CÁI ĐÃ IN của mẫu này.
      *
-     * Một sản phẩm in được bằng NHIỀU cuộn và mỗi cuộn in ra mấy cái là khác
-     * nhau (1 cái đen, 1 cái trắng...), nên tất cả nằm ở bảng nối
-     * san_pham_vat_tu — xem entity SanPhamVatTu.
+     * Không cộng từ các dòng nhựa được: một cái clicker nhiều màu ăn cả cuộn đỏ
+     * lẫn cuộn vàng, in 10 cái thì mỗi cuộn đều "dùng cho 10 cái" nhưng tổng
+     * vẫn là 10, không phải 20. Số cái dùng TỪNG cuộn nằm ở san_pham_vat_tu
+     * (in 1 cái đen + 1 cái trắng thì mỗi dòng 1, tổng ở đây là 2).
+     */
+    @Column(name = "so_luong", nullable = false,
+            columnDefinition = "integer default 1 not null")
+    private Integer soLuong = 1;
+
+    /**
+     * NHIỀU MÀU hay MỘT MÀU — quyết định cách đếm số cái:
+     *   nhiều màu: mỗi cái ăn TẤT CẢ các cuộn trong danh sách (clicker đỏ + vàng),
+     *              nhập một số lượng chung, mọi dòng nhựa đều bằng số đó.
+     *   một màu:   mỗi dòng là một lô riêng (1 cái đen, 1 cái trắng),
+     *              nhập số cái từng dòng, soLuong = cộng các dòng.
+     */
+    @Column(name = "nhieu_mau", nullable = false,
+            columnDefinition = "boolean default false not null")
+    private Boolean nhieuMau = false;
+
+    /**
+     * TẤT CẢ ẢNH của sản phẩm, mỗi dòng một đường dẫn, ảnh đầu tiên là ảnh bìa.
+     * Web khách dùng làm slide ở trang chi tiết. Cột hinh_anh vẫn giữ và luôn
+     * bằng ảnh đầu tiên, để mấy chỗ chỉ cần một ảnh (thẻ sản phẩm, giỏ hàng)
+     * khỏi phải đổi.
+     */
+    @Column(name = "danh_sach_anh", columnDefinition = "text")
+    private String danhSachAnh;
+
+    /*
+     * Nhựa đã dùng nằm ở bảng nối san_pham_vat_tu — xem entity SanPhamVatTu.
      * Màu của sản phẩm suy từ màu của các cuộn đó, không lưu riêng.
      */
 
@@ -86,4 +114,36 @@ public class SanPham extends BanGhi {
     public void setLoaiSanPham(String loaiSanPham) { this.loaiSanPham = loaiSanPham; }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
+    /** Luôn ít nhất 1: in 0 cái thì không có sản phẩm để mà lưu. */
+    public Integer getSoLuong() { return soLuong == null || soLuong < 1 ? 1 : soLuong; }
+    public void setSoLuong(Integer soLuong) { this.soLuong = soLuong == null || soLuong < 1 ? 1 : soLuong; }
+    public Boolean getNhieuMau() { return Boolean.TRUE.equals(nhieuMau); }
+    public void setNhieuMau(Boolean nhieuMau) { this.nhieuMau = Boolean.TRUE.equals(nhieuMau); }
+
+    /** Danh sách ảnh dạng list. Bản ghi cũ chưa có danh sách thì lấy ảnh bìa làm ảnh duy nhất. */
+    @Transient
+    public java.util.List<String> getDanhSachAnhList() {
+        java.util.List<String> ds = new java.util.ArrayList<>();
+        if (danhSachAnh != null) {
+            for (String dong : danhSachAnh.split("\n")) {
+                String u = dong.trim();
+                if (!u.isEmpty() && !ds.contains(u)) ds.add(u);
+            }
+        }
+        if (ds.isEmpty() && hinhAnh != null && !hinhAnh.isBlank()) ds.add(hinhAnh.trim());
+        return ds;
+    }
+
+    /** Ghi danh sách ảnh và kéo ảnh bìa (hinh_anh) theo ảnh đầu tiên. */
+    public void setDanhSachAnhList(java.util.List<String> ds) {
+        java.util.List<String> sach = new java.util.ArrayList<>();
+        if (ds != null) {
+            for (String u : ds) {
+                String t = u == null ? "" : u.trim();
+                if (!t.isEmpty() && !sach.contains(t)) sach.add(t);
+            }
+        }
+        this.danhSachAnh = sach.isEmpty() ? null : String.join("\n", sach);
+        this.hinhAnh = sach.isEmpty() ? null : sach.get(0);
+    }
 }

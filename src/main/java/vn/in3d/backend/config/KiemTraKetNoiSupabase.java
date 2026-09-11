@@ -37,7 +37,8 @@ public class KiemTraKetNoiSupabase {
     private static final Map<String, List<String>> CAN_CO = Map.ofEntries(
             Map.entry("nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted")),
             Map.entry("san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham",
-                                                   "danh_muc_id", "is_deleted")),
+                                                   "danh_muc_id", "so_luong", "nhieu_mau", "danh_sach_anh",
+                                                   "is_deleted")),
             // Bảng nối: mỗi dòng là "in mấy cái bằng cuộn nhựa nào"
             Map.entry("san_pham_vat_tu",   List.of("id", "san_pham_id", "vat_tu_id",
                                                    "so_luong", "gram_nhua", "gram_thua")),

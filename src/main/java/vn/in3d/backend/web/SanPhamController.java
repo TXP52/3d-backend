@@ -84,7 +84,11 @@ public class SanPhamController {
             // Tên danh mục để trang chi tiết bên web khách khỏi phải gọi thêm /danh-muc
             m.put("danhMuc", tenDanhMuc.get(sp.getDanhMucId()));
             m.put("hinhAnh", sp.getHinhAnh());
+            // Tất cả ảnh (ảnh đầu = ảnh bìa) — web khách làm slide ở trang chi tiết
+            m.put("danhSachAnh", sp.getDanhSachAnhList());
             m.put("tonKho", sp.getTonKho());
+            m.put("soLuong", sp.getSoLuong());            // tổng số cái đã in
+            m.put("nhieuMau", sp.getNhieuMau());          // mỗi cái dùng mọi cuộn hay mỗi dòng một lô
             m.put("dangBan", sp.getDangBan());
             m.put("loaiSanPham", sp.getLoaiSanPham());
             m.put("trangThai", sp.getTrangThai());
@@ -95,7 +99,6 @@ public class SanPhamController {
             List<Map<String, Object>> dsNhua = new java.util.ArrayList<>();
             List<Map<String, Object>> dsMau = new java.util.ArrayList<>();
             Set<Long> daCoMau = new java.util.LinkedHashSet<>();
-            int tongSoCai = 0;
             int tongGram = 0;
             long tienNhua = 0;
             int gramMin = Integer.MAX_VALUE, gramMax = 0;
@@ -120,7 +123,6 @@ public class SanPhamController {
                 d.put("donGiaMoiGram", v == null ? 0 : v.getDonGiaMoiGram());
                 dsNhua.add(d);
 
-                tongSoCai += n.getSoLuong();
                 tongGram += n.getTongGram();
                 if (v != null) tienNhua += Math.round(n.getTongGram() * v.getDonGiaMoiGram());
                 if (n.getGramMoiCai() > 0) {
@@ -136,7 +138,6 @@ public class SanPhamController {
             }
             m.put("vatTus", dsNhua);
             m.put("mauSac", dsMau);
-            m.put("soLuong", tongSoCai);                  // tổng số cái đã in
             m.put("tongGramNhua", tongGram);              // nhựa đã trừ khỏi kho
             // Nhựa cho MỘT cái: các dòng có thể khác nhau nên trả cả khoảng
             m.put("gramMoiCaiMin", gramMax == 0 ? 0 : gramMin);
@@ -157,10 +158,12 @@ public class SanPhamController {
         }
         sp.setTen(ten.trim());
         sp.setMoTa(chuoi(td.get("moTa")));
-        sp.setHinhAnh(chuoi(td.get("hinhAnh")));
+        ganAnh(sp, td);
         sp.setGia((long) soNguyen(td.get("gia")));
         sp.setGiaChu(dinhDangGia(sp.getGia()));
         sp.setTonKho(soNguyen(td.get("tonKho")));
+        if (td.containsKey("soLuong")) sp.setSoLuong(soNguyen(td.get("soLuong")));
+        if (td.containsKey("nhieuMau")) sp.setNhieuMau(Boolean.parseBoolean(String.valueOf(td.get("nhieuMau"))));
         if (td.containsKey("dangBan")) sp.setDangBan(Boolean.parseBoolean(String.valueOf(td.get("dangBan"))));
 
         Long dmId = soHoacNull(td.get("danhMucId"));
@@ -180,8 +183,9 @@ public class SanPhamController {
             if (tt != null && !tt.isBlank()) sp.setTrangThai(tt);
         }
 
+        List<DongNhua> dsNhua = chuanHoaNhua(sp, doDanhSachNhua(td.get("vatTus")));
         SanPham daLuu = sanPhamRepo.save(sp);
-        luuDanhSachNhua(daLuu.getId(), doDanhSachNhua(td.get("vatTus")));
+        luuDanhSachNhua(daLuu.getId(), dsNhua);
         return daLuu;
     }
 
@@ -197,7 +201,13 @@ public class SanPhamController {
             sp.setTen(ten);
         }
         if (thayDoi.containsKey("moTa")) sp.setMoTa(chuoi(thayDoi.get("moTa")));
-        if (thayDoi.containsKey("hinhAnh")) sp.setHinhAnh(chuoi(thayDoi.get("hinhAnh")));
+        ganAnh(sp, thayDoi);
+        int soLuongCu = sp.getSoLuong();
+        boolean nhieuMauCu = sp.getNhieuMau();
+        if (thayDoi.containsKey("soLuong")) sp.setSoLuong(soNguyen(thayDoi.get("soLuong")));
+        if (thayDoi.containsKey("nhieuMau")) {
+            sp.setNhieuMau(Boolean.parseBoolean(String.valueOf(thayDoi.get("nhieuMau"))));
+        }
         if (thayDoi.containsKey("gia")) {
             long gia = Long.parseLong(String.valueOf(thayDoi.get("gia")));
             sp.setGia(gia);
@@ -232,12 +242,57 @@ public class SanPhamController {
             kiemTraTrangThai(tt);
             sp.setTrangThai(tt);
         }
-        // Chỉ đụng tới danh sách nhựa khi form thật sự gửi lên, để mấy chỗ chỉ
-        // đổi trạng thái hay ẩn/hiện (PUT một trường) không xoá mất liên kết nhựa
-        if (thayDoi.containsKey("vatTus")) {
-            luuDanhSachNhua(sp.getId(), doDanhSachNhua(thayDoi.get("vatTus")));
+        // Gửi lại danh sách nhựa, hoặc chỉ đổi số lượng / kiểu màu: chuẩn hoá theo
+        // kiểu màu rồi trừ/hoàn kho phần chênh. PUT chỉ đổi trạng thái hay ẩn/hiện
+        // thì không đụng tới nhựa.
+        boolean doiCachDem = sp.getSoLuong() != soLuongCu || sp.getNhieuMau() != nhieuMauCu;
+        if (thayDoi.containsKey("vatTus") || doiCachDem) {
+            List<DongNhua> ds = thayDoi.containsKey("vatTus")
+                    ? doDanhSachNhua(thayDoi.get("vatTus")) : nhuaHienTai(sp.getId());
+            luuDanhSachNhua(sp.getId(), chuanHoaNhua(sp, ds));
         }
         return sanPhamRepo.save(sp);
+    }
+
+    /**
+     * Ảnh: form mới gửi "danhSachAnh" (mảng, ảnh đầu = bìa); chỗ cũ chỉ gửi
+     * "hinhAnh" thì coi là đổi ảnh bìa và giữ nguyên các ảnh còn lại.
+     */
+    private void ganAnh(SanPham sp, Map<String, Object> td) {
+        if (td.containsKey("danhSachAnh")) {
+            List<String> ds = new java.util.ArrayList<>();
+            if (td.get("danhSachAnh") instanceof List<?> tho) {
+                for (Object o : tho) if (o != null) ds.add(String.valueOf(o));
+            }
+            sp.setDanhSachAnhList(ds);
+        } else if (td.containsKey("hinhAnh")) {
+            List<String> ds = new java.util.ArrayList<>(sp.getDanhSachAnhList());
+            String bia = chuoi(td.get("hinhAnh"));
+            if (!ds.isEmpty()) ds.remove(0);
+            if (bia != null && !bia.isBlank()) ds.add(0, bia);
+            sp.setDanhSachAnhList(ds);
+        }
+    }
+
+    /**
+     * Chuẩn hoá số cái theo kiểu màu (xem SanPham.nhieuMau):
+     *   nhiều màu -> mọi dòng nhựa = số lượng chung của sản phẩm
+     *   một màu   -> số lượng sản phẩm = cộng số cái các dòng
+     */
+    private List<DongNhua> chuanHoaNhua(SanPham sp, List<DongNhua> ds) {
+        if (sp.getNhieuMau()) {
+            int sl = sp.getSoLuong();
+            return ds.stream().map(d -> new DongNhua(d.vatTuId(), sl, d.gramNhua(), d.gramThua())).toList();
+        }
+        if (!ds.isEmpty()) sp.setSoLuong(ds.stream().mapToInt(DongNhua::soLuong).sum());
+        return ds;
+    }
+
+    /** Danh sách nhựa đang lưu, để tính lại khi chỉ đổi số lượng hoặc kiểu màu. */
+    private List<DongNhua> nhuaHienTai(Long sanPhamId) {
+        return spVatTuRepo.findBySanPhamIdOrderByIdAsc(sanPhamId).stream()
+                .map(n -> new DongNhua(n.getVatTuId(), n.getSoLuong(), n.getGramNhua(), n.getGramThua()))
+                .toList();
     }
 
     /** XOÁ MỀM sản phẩm: chỉ bật cờ is_deleted, dữ liệu vẫn nằm trong database. */
