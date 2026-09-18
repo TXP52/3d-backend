@@ -22,6 +22,9 @@ import java.time.LocalDate;
  */
 @Entity
 @Table(name = "khuyen_mai")
+// UPDATE chỉ ghi cột thực sự đổi: sửa mã ở trang quản trị không ghi đè da_dung
+// mà một đơn hàng vừa tăng trong lúc đó
+@org.hibernate.annotations.DynamicUpdate
 public class KhuyenMai extends BanGhi {
 
     @Id

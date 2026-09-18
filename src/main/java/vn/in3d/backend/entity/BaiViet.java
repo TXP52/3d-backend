@@ -16,6 +16,9 @@ import jakarta.persistence.*;
  */
 @Entity
 @Table(name = "bai_viet")
+// UPDATE chỉ ghi cột thực sự đổi: sửa bài ở trang quản trị không ghi đè luot_xem
+// mà khách vừa tăng trong lúc đó
+@org.hibernate.annotations.DynamicUpdate
 public class BaiViet extends BanGhi {
 
     @Id

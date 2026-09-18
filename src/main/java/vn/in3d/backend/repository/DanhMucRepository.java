@@ -18,4 +18,7 @@ public interface DanhMucRepository extends JpaRepository<DanhMuc, Long> {
     Optional<DanhMuc> findByTenIgnoreCaseAndNhomAndDaXoaFalse(String ten, String nhom);
 
     List<DanhMuc> findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc(String nhom);
+
+    /** MỌI danh mục kể cả đã xoá, cùng thứ tự — bộ nhớ đệm nạp một lượt rồi tự lọc. */
+    List<DanhMuc> findAllByOrderByThuTuAscIdAsc();
 }

@@ -13,7 +13,9 @@ import vn.in3d.backend.repository.NguoiDungRepository;
 import vn.in3d.backend.repository.DanhMucRepository;
 import vn.in3d.backend.repository.MauSacRepository;
 import vn.in3d.backend.repository.VatTuRepository;
+import vn.in3d.backend.service.BoNhoDem;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -51,11 +53,24 @@ public class DataSeeder {
     CommandLineRunner napDuLieuBanDau(NguoiDungRepository nguoiDungRepo,
                                       MauSacRepository mauSacRepo,
                                       DanhMucRepository danhMucRepo,
-                                      VatTuRepository vatTuRepo) {
+                                      VatTuRepository vatTuRepo,
+                                      BoNhoDem boNho) {
         return args -> {
-            napAdmin(nguoiDungRepo);
-            napMauSac(mauSacRepo);
-            napLoaiVatTu(danhMucRepo, vatTuRepo);
+            boolean ghiNguoiDung = napAdmin(nguoiDungRepo);
+            boolean ghiMauSac = napMauSac(mauSacRepo);
+            boolean ghiLoaiVatTu = napLoaiVatTu(danhMucRepo, vatTuRepo);
+            // Bộ nhớ đệm đã nạp lúc dựng bean (để cổng mở là đã ấm), tức TRƯỚC seeder.
+            // Lần đầu chạy trên database trống mà không nạp lại thì tài khoản quản trị
+            // và bảng màu vừa tạo chưa có trong bộ nhớ đệm (đăng nhập admin sẽ trượt).
+            List<String> khoa = new ArrayList<>();
+            if (ghiNguoiDung) khoa.add(BoNhoDem.ND);
+            if (ghiMauSac) khoa.add(BoNhoDem.MS);
+            if (ghiLoaiVatTu) {
+                khoa.add(BoNhoDem.DM);
+                khoa.add(BoNhoDem.VT);
+                khoa.add(BoNhoDem.SP);
+            }
+            if (!khoa.isEmpty()) boNho.xoaVaNapLai(khoa.toArray(new String[0]));
         };
     }
 
@@ -64,9 +79,13 @@ public class DataSeeder {
      * chọn) chứ không phải hàng hoá mẫu; chỉ nạp khi nhóm vat_tu còn trống, xoá đi
      * trong trang Danh mục thì lần khởi động sau cũng không mọc lại chừng nào còn
      * ít nhất một loại. Sau đó nối vật tư cũ (chỉ có cột loai) sang loại tương ứng.
+     *
+     * @return có ghi gì vào database không (để nơi gọi nạp lại bộ nhớ đệm)
      */
-    private void napLoaiVatTu(DanhMucRepository repo, VatTuRepository vatTuRepo) {
-        if (repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu").isEmpty()) {
+    private boolean napLoaiVatTu(DanhMucRepository repo, VatTuRepository vatTuRepo) {
+        boolean daGhi = false;
+        List<DanhMuc> loai = repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu");
+        if (loai.isEmpty()) {
             record L(String ten, String tinhChat, String icon, int thuTu) {}
             List<L> ds = List.of(
                     new L("Máy in",   "may_in",   "fa-print",              1),
@@ -82,9 +101,11 @@ public class DataSeeder {
                 repo.save(d);
             }
             System.out.println("[IN3D] Đã nạp " + ds.size() + " loại vật tư cơ bản vào bảng danh mục");
+            daGhi = true;
+            // Vừa thêm thì mới phải hỏi lại; bình thường dùng luôn kết quả ở trên (bớt một lượt đi-về)
+            loai = repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu");
         }
 
-        List<DanhMuc> loai = repo.findByNhomAndDaXoaFalseOrderByThuTuAscIdAsc("vat_tu");
         int daNoi = 0;
         for (VatTu v : vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc()) {
             if (v.getDanhMucId() != null) continue;
@@ -99,11 +120,12 @@ public class DataSeeder {
             }
         }
         if (daNoi > 0) System.out.println("[IN3D] Đã nối loại cho " + daNoi + " vật tư cũ");
+        return daGhi || daNoi > 0;
     }
 
-    /** Bộ màu nhựa đang dùng trong kho + vài màu phổ biến. */
-    private void napMauSac(MauSacRepository repo) {
-        if (repo.count() > 0) return;
+    /** Bộ màu nhựa đang dùng trong kho + vài màu phổ biến. @return có ghi gì không */
+    private boolean napMauSac(MauSacRepository repo) {
+        if (repo.count() > 0) return false;
         record M(String ten, String ma, int thuTu) {}
         List<M> ds = List.of(
                 new M("Đỏ",     "#e03131", 1),
@@ -127,15 +149,18 @@ public class DataSeeder {
             repo.save(ms);
         }
         System.out.println("[IN3D] Đã nạp bảng màu sắc: " + ds.size() + " màu");
+        return true;
     }
 
     /**
      * Đảm bảo tài khoản quản trị luôn đúng cấu hình (email, mật khẩu, vai trò admin).
      * Nếu tài khoản đã tồn tại với mật khẩu/vai trò khác thì đặt lại cho khớp.
      * Muốn tắt: đặt biến môi trường IN3D_TU_TAO_ADMIN=false
+     *
+     * @return có ghi gì vào bảng nguoi_dung không (để nơi gọi nạp lại bộ nhớ đệm)
      */
-    private void napAdmin(NguoiDungRepository repo) {
-        if ("false".equalsIgnoreCase(System.getenv("IN3D_TU_TAO_ADMIN"))) return;
+    private boolean napAdmin(NguoiDungRepository repo) {
+        if ("false".equalsIgnoreCase(System.getenv("IN3D_TU_TAO_ADMIN"))) return false;
 
         BCryptPasswordEncoder maHoa = new BCryptPasswordEncoder();
         var hienCo = repo.findByEmailIgnoreCase(adminEmail);
@@ -149,9 +174,9 @@ public class DataSeeder {
             repo.save(admin);
             System.out.println("[IN3D] Đã tạo tài khoản quản trị: " + adminEmail);
             chiMotAdmin(repo);
-            return;
+            return true;
         }
-        chiMotAdmin(repo);
+        boolean daHaQuyen = chiMotAdmin(repo);
 
         NguoiDung nd = hienCo.get();
         boolean doiVaiTro = !"admin".equals(nd.getVaiTro());
@@ -163,23 +188,28 @@ public class DataSeeder {
             System.out.println("[IN3D] Đã cập nhật tài khoản quản trị " + adminEmail
                     + (doiVaiTro ? " (nâng quyền admin)" : "") + (doiMatKhau ? " (đặt lại mật khẩu)" : ""));
         }
+        return daHaQuyen || doiVaiTro || doiMatKhau;
     }
 
     /**
      * Chỉ ĐÚNG MỘT email được quyền quản trị. Mọi tài khoản khác lỡ mang vai trò
      * admin bị hạ về khách hàng — XacThucService cũng chặn ở bước đăng nhập,
      * nhưng dọn ở đây thì danh sách người dùng không còn hiện hai "Quản trị".
+     *
+     * @return có hạ quyền tài khoản nào không
      */
-    private void chiMotAdmin(NguoiDungRepository repo) {
-        repo.findByDaXoaFalseOrderByIdAsc().stream()
+    private boolean chiMotAdmin(NguoiDungRepository repo) {
+        List<NguoiDung> haQuyen = repo.findByDaXoaFalseOrderByIdAsc().stream()
                 .filter(nd -> "admin".equals(nd.getVaiTro()))
                 .filter(nd -> !adminEmail.equalsIgnoreCase(nd.getEmail()))
-                .forEach(nd -> {
-                    nd.setVaiTro("khach_hang");
-                    repo.save(nd);
-                    System.out.println("[IN3D] Hạ quyền admin của " + nd.getEmail()
-                            + " — chỉ " + adminEmail + " được vào trang quản trị.");
-                });
+                .toList();
+        for (NguoiDung nd : haQuyen) {
+            nd.setVaiTro("khach_hang");
+            repo.save(nd);
+            System.out.println("[IN3D] Hạ quyền admin của " + nd.getEmail()
+                    + " — chỉ " + adminEmail + " được vào trang quản trị.");
+        }
+        return !haQuyen.isEmpty();
     }
 
 }

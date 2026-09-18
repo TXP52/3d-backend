@@ -33,8 +33,17 @@ public record DatHangRequest(
         @Valid
         List<MatHang> matHang
 ) {
-    /** Một món trong giỏ. */
+    /**
+     * Một món trong giỏ.
+     * bienTheId: phân loại khách đã chọn — ƯU TIÊN nhất (giá và kho đều theo biến thể).
+     * sanPhamId: có thì tra theo id (chắc chắn đúng món); không có hoặc món đã xoá
+     * thì mới tra theo tên như bản cũ — giỏ cũ chưa biết biến thể vẫn đặt được,
+     * backend tự lấy biến thể MẶC ĐỊNH của sản phẩm. donGia chỉ dùng cho món KHÔNG
+     * có trong bảng sản phẩm (in theo yêu cầu...), món có trong bảng luôn lấy giá database.
+     */
     public record MatHang(
+            Long bienTheId,
+            Long sanPhamId,
             @NotBlank(message = "Thiếu tên sản phẩm") String ten,
             Long donGia,
             @Positive(message = "Số lượng phải lớn hơn 0") Integer soLuong

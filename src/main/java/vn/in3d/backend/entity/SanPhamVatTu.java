@@ -26,6 +26,13 @@ public class SanPhamVatTu {
     @Column(name = "san_pham_id", nullable = false)
     private Long sanPhamId;
 
+    /**
+     * Lô in này thuộc BIẾN THỂ nào (in cái màu đỏ hay cái màu xám).
+     * Dữ liệu cũ đã được migration gắn hết vào biến thể mặc định của sản phẩm.
+     */
+    @Column(name = "bien_the_id")
+    private Long bienTheId;
+
     @Column(name = "vat_tu_id", nullable = false)
     private Long vatTuId;
 
@@ -55,6 +62,8 @@ public class SanPhamVatTu {
     public void setId(Long id) { this.id = id; }
     public Long getSanPhamId() { return sanPhamId; }
     public void setSanPhamId(Long sanPhamId) { this.sanPhamId = sanPhamId; }
+    public Long getBienTheId() { return bienTheId; }
+    public void setBienTheId(Long bienTheId) { this.bienTheId = bienTheId; }
     public Long getVatTuId() { return vatTuId; }
     public void setVatTuId(Long vatTuId) { this.vatTuId = vatTuId; }
     public Integer getGramNhua() { return gramNhua == null ? 0 : gramNhua; }

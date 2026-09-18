@@ -4,6 +4,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.entity.NguoiDung;
+import vn.in3d.backend.service.BoNhoDem;
 import vn.in3d.backend.service.XacThucService;
 
 import java.util.List;
@@ -18,16 +19,21 @@ import java.util.Map;
 public class XacThucController {
 
     private final XacThucService xacThuc;
+    private final BoNhoDem boNho;
 
-    public XacThucController(XacThucService xacThuc) {
+    public XacThucController(XacThucService xacThuc, BoNhoDem boNho) {
         this.xacThuc = xacThuc;
+        this.boNho = boNho;
     }
 
     /** Đăng ký tài khoản. Người đầu tiên đăng ký tự động là admin. */
     @PostMapping("/auth/dang-ky")
     @ResponseStatus(HttpStatus.CREATED)
     public NguoiDung dangKy(@RequestBody Map<String, String> body) {
-        return xacThuc.dangKy(body.get("hoTen"), body.get("email"), body.get("matKhau"));
+        NguoiDung nd = xacThuc.dangKy(body.get("hoTen"), body.get("email"), body.get("matKhau"));
+        // dangKy đã commit: nạp lại danh sách tài khoản (token của người mới đọc được ngay từ bộ nhớ đệm)
+        boNho.xoaVaNapLai(BoNhoDem.ND);
+        return nd;
     }
 
     /** Đăng nhập cho KHÁCH (website bán hàng): trả token luôn, không cần OTP. */

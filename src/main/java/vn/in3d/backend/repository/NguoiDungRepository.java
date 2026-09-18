@@ -12,5 +12,8 @@ public interface NguoiDungRepository extends JpaRepository<NguoiDung, Long> {
     Optional<NguoiDung> findByEmailIgnoreCaseAndDaXoaFalse(String email);
 
     List<NguoiDung> findByDaXoaFalseOrderByIdAsc();
+
+    /** MỌI tài khoản kể cả đã xoá — bộ nhớ đệm dùng để đọc token khỏi hỏi database. */
+    List<NguoiDung> findAllByOrderByIdAsc();
     boolean existsByEmailIgnoreCase(String email);
 }

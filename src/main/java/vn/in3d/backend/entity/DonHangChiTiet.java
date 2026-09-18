@@ -24,6 +24,17 @@ public class DonHangChiTiet extends BanGhi {
     @Column(name = "san_pham_id")
     private Long sanPhamId;
 
+    /**
+     * Biến thể (phân loại) khách đã chọn — để trống với món shop tự gõ tay,
+     * không có trong bảng sản phẩm. Kho trừ / trả theo ĐÚNG biến thể này.
+     */
+    @Column(name = "bien_the_id")
+    private Long bienTheId;
+
+    /** Tên biến thể CHỤP LẠI lúc đặt: sau này chủ shop đổi tên phân loại thì đơn cũ vẫn đúng. */
+    @Column(name = "ten_bien_the", columnDefinition = "text")
+    private String tenBienThe;
+
     @Column(name = "ten_san_pham", nullable = false)
     private String tenSanPham;
 
@@ -62,6 +73,10 @@ public class DonHangChiTiet extends BanGhi {
     public void setDonHang(DonHang donHang) { this.donHang = donHang; }
     public Long getSanPhamId() { return sanPhamId; }
     public void setSanPhamId(Long sanPhamId) { this.sanPhamId = sanPhamId; }
+    public Long getBienTheId() { return bienTheId; }
+    public void setBienTheId(Long bienTheId) { this.bienTheId = bienTheId; }
+    public String getTenBienThe() { return tenBienThe; }
+    public void setTenBienThe(String tenBienThe) { this.tenBienThe = tenBienThe; }
     public String getTenSanPham() { return tenSanPham; }
     public void setTenSanPham(String tenSanPham) { this.tenSanPham = tenSanPham; }
     public Long getDonGia() { return donGia; }

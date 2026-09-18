@@ -1,8 +1,8 @@
 package vn.in3d.backend.service;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.entity.KhuyenMai;
 import vn.in3d.backend.repository.DonHangRepository;
@@ -10,6 +10,7 @@ import vn.in3d.backend.repository.KhuyenMaiRepository;
 
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Kiểm tra và áp khuyến mãi. Hai kiểu chạy song song:
@@ -21,12 +22,17 @@ import java.util.List;
  *   GIẢM GIÁ THEO ĐƠN (kieu_ap_dung = don_hang)
  *     Khách gõ mã ở giỏ hàng, giảm trên tổng đơn SAU khi đã giảm giá món.
  *
- * Dùng chung cho hai chỗ:
- *   - /api/khuyen-mai/kiem-tra : khách bấm "Áp dụng" ở giỏ hàng để xem trước
- *   - DonHangService.datHang   : lúc tạo đơn thật, tính lại từ đầu
+ * Dùng chung cho ba chỗ:
+ *   - /api/khuyen-mai/kiem-tra  : khách bấm "Áp dụng" ở giỏ hàng để xem trước
+ *   - /api/gio-hang/bao-gia     : giỏ hàng hỏi giá cả giỏ
+ *   - DonHangService.datHang    : lúc tạo đơn thật, tính lại từ đầu
  *
  * Tính lại ở bước tạo đơn là bắt buộc — số tiền giảm trình duyệt gửi lên
  * hoàn toàn có thể bị sửa, không được tin.
+ *
+ * Không còn @Transactional(readOnly = true): transaction chỉ-đọc quanh MỘT câu
+ * SELECT tốn thêm một lượt COMMIT (~250 ms). Gọi từ datHang thì vẫn nằm trong
+ * transaction của đơn; gọi riêng thì câu SELECT tự chạy autocommit.
  */
 @Service
 public class KhuyenMaiService {
@@ -35,10 +41,12 @@ public class KhuyenMaiService {
 
     private final KhuyenMaiRepository repo;
     private final DonHangRepository donHangRepo;
+    private final JdbcTemplate jdbc;
 
-    public KhuyenMaiService(KhuyenMaiRepository repo, DonHangRepository donHangRepo) {
+    public KhuyenMaiService(KhuyenMaiRepository repo, DonHangRepository donHangRepo, JdbcTemplate jdbc) {
         this.repo = repo;
         this.donHangRepo = donHangRepo;
+        this.jdbc = jdbc;
     }
 
     /** Kết quả áp mã đơn hàng: mã nào, giảm bao nhiêu, còn phải trả bao nhiêu. */
@@ -57,14 +65,23 @@ public class KhuyenMaiService {
         public boolean coGiam() { return giamMoiDonVi > 0; }
     }
 
+    /** Mọi khuyến mãi CHƯA xoá, mới trước — MỘT câu SELECT, nạp một lần rồi dùng cho cả đơn. */
+    public List<KhuyenMai> dsChuaXoa() {
+        return repo.findByDaXoaFalseOrderByIdDesc();
+    }
+
     /* ============================================================
        GIẢM GIÁ SẢN PHẨM — tự áp, không cần mã
        ============================================================ */
 
-    /** Các chương trình giảm giá sản phẩm đang chạy. */
-    @Transactional(readOnly = true)
+    /** Các chương trình giảm giá sản phẩm đang chạy (hỏi database). */
     public List<KhuyenMai> khuyenMaiSanPhamDangChay() {
-        return repo.findByDaXoaFalseOrderByIdDesc().stream()
+        return khuyenMaiSanPhamDangChay(dsChuaXoa());
+    }
+
+    /** Lọc chương trình giảm giá sản phẩm đang chạy từ danh sách đã nạp (giữ thứ tự mới trước). */
+    public List<KhuyenMai> khuyenMaiSanPhamDangChay(List<KhuyenMai> daNap) {
+        return daNap.stream()
                 .filter(KhuyenMai::laKhuyenMaiSanPham)
                 .filter(KhuyenMai::dangChay)
                 .toList();
@@ -89,7 +106,6 @@ public class KhuyenMaiService {
         return new GiaMon(giaGoc, giaGoc - giamTotNhat, giamTotNhat, chon);
     }
 
-    @Transactional(readOnly = true)
     public GiaMon giaSauGiam(Long sanPhamId, long giaGoc) {
         return giaSauGiam(sanPhamId, giaGoc, khuyenMaiSanPhamDangChay());
     }
@@ -104,18 +120,41 @@ public class KhuyenMaiService {
      *
      * @param tongTien tiền hàng ĐÃ trừ khuyến mãi sản phẩm
      */
-    @Transactional(readOnly = true)
     public KetQua kiemTra(String ma, long tongTien) {
         return kiemTra(ma, tongTien, NguoiDat.khongRo());
     }
 
-    @Transactional(readOnly = true)
+    /** Tra mã trong database (một câu SELECT) rồi kiểm tra. */
     public KetQua kiemTra(String ma, long tongTien, NguoiDat nguoiDat) {
         if (ma == null || ma.isBlank()) {
             throw loi("Vui lòng nhập mã khuyến mãi.");
         }
-        KhuyenMai km = repo.findByMaIgnoreCaseAndDaXoaFalse(ma.trim())
-                .orElseThrow(() -> loi("Mã \"" + ma.trim().toUpperCase() + "\" không tồn tại."));
+        return kiemTraMa(repo.findByMaIgnoreCaseAndDaXoaFalse(ma.trim()).orElse(null), ma, tongTien, nguoiDat);
+    }
+
+    /**
+     * Như trên nhưng tra mã trong danh sách khuyến mãi CHƯA xoá đã nạp sẵn
+     * (datHang nạp một lần; giỏ hàng dùng bộ nhớ đệm) — không tốn thêm lượt hỏi database.
+     */
+    public KetQua kiemTra(String ma, long tongTien, NguoiDat nguoiDat, List<KhuyenMai> daNap) {
+        if (ma == null || ma.isBlank()) {
+            throw loi("Vui lòng nhập mã khuyến mãi.");
+        }
+        String tim = ma.trim();
+        KhuyenMai km = null;
+        for (KhuyenMai k : daNap) {
+            if (k.getMa() != null && !k.getDaXoa() && k.getMa().equalsIgnoreCase(tim)) {
+                km = k;
+                break;
+            }
+        }
+        return kiemTraMa(km, ma, tongTien, nguoiDat);
+    }
+
+    private KetQua kiemTraMa(KhuyenMai km, String ma, long tongTien, NguoiDat nguoiDat) {
+        if (km == null) {
+            throw loi("Mã \"" + ma.trim().toUpperCase() + "\" không tồn tại.");
+        }
 
         // Chương trình giảm giá sản phẩm không phải mã để gõ — nó tự áp vào giá món
         if (km.laKhuyenMaiSanPham()) {
@@ -167,21 +206,25 @@ public class KhuyenMaiService {
         return false;
     }
 
-    /** Ghi nhận đã dùng thêm 1 lượt. Gọi sau khi đơn được lưu thành công. */
-    @Transactional
+    /**
+     * Ghi nhận đã dùng thêm 1 lượt. Gọi sau khi đơn được lưu, TRONG transaction của đơn.
+     *
+     * MỘT câu UPDATE có điều kiện thay cho đọc-sửa-ghi: hai đơn cùng lúc dùng lượt cuối
+     * thì database chỉ cho một đơn tăng được. Không tăng được (0 dòng) nghĩa là mã vừa
+     * hết lượt — ném 400 để cả đơn rollback, khách không được giảm quá số lượt.
+     */
     public void ghiNhanDaDung(Long id) {
-        repo.findById(id).ifPresent(km -> {
-            km.setDaDung(km.getDaDung() + 1);
-            repo.save(km);
-        });
+        int soDong = jdbc.update("update khuyen_mai set da_dung = da_dung + 1, updated_at = now() "
+                + "where id = ? and (so_luong = 0 or da_dung < so_luong)", id);
+        if (soDong == 0) throw loi("Mã này đã hết lượt sử dụng.");
     }
 
     private ResponseStatusException loi(String thongBao) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, thongBao);
     }
 
-    /** 50000 -> "50.000₫" */
-    static String tien(long so) {
-        return String.format("%,d", so).replace(',', '.') + "₫";
+    /** 50000 -> "50.000₫" (cố định dấu chấm, không phụ thuộc ngôn ngữ của máy chạy backend) */
+    public static String tien(long so) {
+        return String.format(Locale.US, "%,d", so).replace(',', '.') + "₫";
     }
 }

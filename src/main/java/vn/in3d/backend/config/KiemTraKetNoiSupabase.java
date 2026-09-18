@@ -11,6 +11,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -109,21 +110,29 @@ public class KiemTraKetNoiSupabase {
         };
     }
 
-    /** Soát từng bảng/cột app cần; thiếu thì dừng ngay kèm danh sách cụ thể. */
+    /**
+     * Soát từng bảng/cột app cần; thiếu thì dừng ngay kèm danh sách cụ thể.
+     * Hỏi MỘT lượt cho cả 12 bảng rồi chia trong bộ nhớ — bản cũ hỏi từng bảng,
+     * 12 lượt đi-về tới Sydney là ~3 giây mỗi lần khởi động.
+     */
     private void kiemTraSchema(Connection c) throws Exception {
         List<String> thieu = new ArrayList<>();
 
-        for (var muc : CAN_CO.entrySet()) {
-            String bang = muc.getKey();
-            List<String> coTrongDb = new ArrayList<>();
-            try (var ps = c.prepareStatement(
-                    "select column_name from information_schema.columns "
-                    + "where table_schema = 'public' and table_name = ?")) {
-                ps.setString(1, bang);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) coTrongDb.add(rs.getString(1));
+        Map<String, List<String>> cotTheoBang = new HashMap<>();
+        try (var ps = c.prepareStatement(
+                "select table_name, column_name from information_schema.columns "
+                + "where table_schema = 'public' and table_name = any(?)")) {
+            ps.setArray(1, c.createArrayOf("text", CAN_CO.keySet().toArray()));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    cotTheoBang.computeIfAbsent(rs.getString(1), k -> new ArrayList<>()).add(rs.getString(2));
                 }
             }
+        }
+
+        for (var muc : CAN_CO.entrySet()) {
+            String bang = muc.getKey();
+            List<String> coTrongDb = cotTheoBang.getOrDefault(bang, List.of());
             if (coTrongDb.isEmpty()) {
                 thieu.add("  - THIẾU HẲN BẢNG: " + bang);
                 continue;

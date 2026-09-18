@@ -1,17 +1,15 @@
 package vn.in3d.backend.web;
 
 import org.springframework.http.HttpStatus;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import vn.in3d.backend.dto.DanhMucDto;
 import vn.in3d.backend.entity.DanhMuc;
-import vn.in3d.backend.entity.SanPham;
-import vn.in3d.backend.entity.VatTu;
 import vn.in3d.backend.repository.DanhMucRepository;
-import vn.in3d.backend.repository.SanPhamRepository;
-import vn.in3d.backend.repository.VatTuRepository;
+import vn.in3d.backend.service.BoNhoDem;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,77 +34,54 @@ public class DanhMucController {
     public static final Set<String> TINH_CHAT = Set.of("may_in", "nhua", "dung_cu");
 
     private final DanhMucRepository repo;
-    private final SanPhamRepository sanPhamRepo;
-    private final VatTuRepository vatTuRepo;
+    private final BoNhoDem boNho;
+    private final TransactionTemplate giaoDich;
+    private final JdbcTemplate jdbc;
 
-    public DanhMucController(DanhMucRepository repo, SanPhamRepository sanPhamRepo, VatTuRepository vatTuRepo) {
+    public DanhMucController(DanhMucRepository repo, BoNhoDem boNho, TransactionTemplate giaoDich, JdbcTemplate jdbc) {
         this.repo = repo;
-        this.sanPhamRepo = sanPhamRepo;
-        this.vatTuRepo = vatTuRepo;
+        this.boNho = boNho;
+        this.giaoDich = giaoDich;
+        this.jdbc = jdbc;
     }
 
     /**
-     * Danh sách danh mục.
+     * Danh sách danh mục (từ bộ nhớ đệm).
      * ?nhom=san_pham hoặc ?nhom=vat_tu để lọc một nhóm; bỏ trống trả cả hai.
      * ?tatCa=false chỉ trả danh mục đang bật (cho website khách).
-     * ?kemSoLuong=true mới đếm soSanPham / soVatTu — đếm là thêm 2 truy vấn
-     * (~600 ms vì database ở xa) mà trang quản trị đã có sẵn hai danh sách đó để tự đếm.
+     * ?kemSoLuong=true mới đếm soSanPham / soVatTu — đếm trên bộ nhớ đệm sản phẩm và kho.
      */
-    // Không bọc @Transactional: mặc định chỉ MỘT truy vấn, mở transaction là thêm một lượt đi-về (~300 ms)
     @GetMapping
     public List<Map<String, Object>> danhSach(@RequestParam(defaultValue = "true") boolean tatCa,
                                               @RequestParam(required = false) String nhom,
                                               @RequestParam(defaultValue = "false") boolean kemSoLuong) {
-        List<SanPham> sanPham = kemSoLuong ? sanPhamRepo.findByDaXoaFalseOrderByIdAsc() : List.of();
-        List<VatTu> vatTu = kemSoLuong ? vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc() : List.of();
-        List<DanhMuc> ds = tatCa ? repo.findByDaXoaFalseOrderByThuTuAscIdAsc()
-                                 : repo.findByDaXoaFalseAndDangHienTrueOrderByThuTuAscIdAsc();
-        return ds.stream()
-                .filter(d -> nhom == null || nhom.isBlank() || nhom.equals(d.getNhom()))
-                .map(d -> {
-                    Map<String, Object> m = new LinkedHashMap<>();
-                    m.put("id", d.getId());
-                    m.put("ten", d.getTen());
-                    m.put("nhom", d.getNhom());
-                    m.put("tinhChat", d.getTinhChat());
-                    m.put("moTa", d.getMoTa());
-                    m.put("icon", d.getIcon());
-                    m.put("thuTu", d.getThuTu());
-                    m.put("dangHien", d.getDangHien());
-                    if (kemSoLuong) {
-                        m.put("soSanPham", sanPham.stream()
-                                .filter(sp -> d.getId().equals(sp.getDanhMucId())).count());
-                        m.put("soVatTu", vatTu.stream()
-                                .filter(v -> d.getId().equals(v.getDanhMucId())).count());
-                    }
-                    m.put("createdAt", d.getCreatedAt());
-                    m.put("updatedAt", d.getUpdatedAt());
-                    return m;
-                }).toList();
+        return boNho.dsDanhMuc(tatCa, nhom, kemSoLuong);
     }
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @Transactional
-    public DanhMuc them(@RequestBody DanhMuc d) {
-        d.setId(null);
-        String ten = d.getTen() == null ? "" : d.getTen().trim();
-        if (ten.isEmpty()) throw loi400("Tên danh mục không được để trống.");
-        d.setTen(ten);
+    public Map<String, Object> them(@RequestBody DanhMuc d) {
+        DanhMuc daLuu = giaoDich.execute(gd -> {
+            d.setId(null);
+            String ten = d.getTen() == null ? "" : d.getTen().trim();
+            if (ten.isEmpty()) throw loi400("Tên danh mục không được để trống.");
+            d.setTen(ten);
 
-        String nhom = d.getNhom();
-        if (!NHOM.contains(nhom)) throw loi400("Nhóm danh mục chỉ nhận: san_pham hoặc vat_tu.");
-        if (NHOM_VAT_TU.equals(nhom)) {
-            d.setTinhChat(chuanHoaTinhChat(d.getTinhChat()));
-        } else {
-            d.setTinhChat(null);   // danh mục sản phẩm không có tính chất
-        }
+            String nhom = d.getNhom();
+            if (!NHOM.contains(nhom)) throw loi400("Nhóm danh mục chỉ nhận: san_pham hoặc vat_tu.");
+            if (NHOM_VAT_TU.equals(nhom)) {
+                d.setTinhChat(chuanHoaTinhChat(d.getTinhChat()));
+            } else {
+                d.setTinhChat(null);   // danh mục sản phẩm không có tính chất
+            }
 
-        repo.findByTenIgnoreCaseAndNhomAndDaXoaFalse(ten, nhom).ifPresent(cu -> {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    (NHOM_VAT_TU.equals(nhom) ? "Loại vật tư \"" : "Danh mục \"") + cu.getTen() + "\" đã có rồi.");
+            repo.findByTenIgnoreCaseAndNhomAndDaXoaFalse(ten, nhom).ifPresent(cu -> {
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        (NHOM_VAT_TU.equals(nhom) ? "Loại vật tư \"" : "Danh mục \"") + cu.getTen() + "\" đã có rồi.");
+            });
+            return repo.save(d);
         });
-        return repo.save(d);
+        return traDanhMuc(daLuu.getId(), daLuu);
     }
 
     /**
@@ -115,66 +90,93 @@ public class DanhMucController {
      * liên kết đó vô nghĩa — muốn chuyển thì tạo dòng mới ở nhóm kia.
      */
     @PutMapping("/{id}")
-    @Transactional
-    public DanhMuc sua(@PathVariable Long id, @RequestBody Map<String, Object> td) {
-        DanhMuc d = timHoacBao(id);
-        if (td.containsKey("ten")) {
-            String ten = String.valueOf(td.get("ten")).trim();
-            if (ten.isEmpty()) throw loi400("Tên danh mục không được để trống.");
-            repo.findByTenIgnoreCaseAndNhomAndDaXoaFalse(ten, d.getNhom()).ifPresent(cu -> {
-                if (!cu.getId().equals(id)) {
-                    throw new ResponseStatusException(HttpStatus.CONFLICT,
-                            "Tên \"" + cu.getTen() + "\" đã có trong nhóm này.");
+    public Map<String, Object> sua(@PathVariable Long id, @RequestBody Map<String, Object> td) {
+        DanhMuc daSua = giaoDich.execute(gd -> {
+            DanhMuc d = timHoacBao(id);
+            if (td.containsKey("ten")) {
+                String ten = String.valueOf(td.get("ten")).trim();
+                if (ten.isEmpty()) throw loi400("Tên danh mục không được để trống.");
+                // Form luôn gửi lại tên: không đổi tên thì khỏi hỏi trùng
+                if (!ten.equals(d.getTen())) {
+                    repo.findByTenIgnoreCaseAndNhomAndDaXoaFalse(ten, d.getNhom()).ifPresent(cu -> {
+                        if (!cu.getId().equals(id)) {
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                    "Tên \"" + cu.getTen() + "\" đã có trong nhóm này.");
+                        }
+                    });
                 }
-            });
-            d.setTen(ten);
-        }
-        if (td.containsKey("moTa")) d.setMoTa(chuoi(td.get("moTa")));
-        if (td.containsKey("icon")) d.setIcon(chuoi(td.get("icon")));
-        if (td.containsKey("thuTu")) d.setThuTu(so(td.get("thuTu")));
-        if (td.containsKey("dangHien")) {
-            d.setDangHien(Boolean.parseBoolean(String.valueOf(td.get("dangHien"))));
-        }
-        if (td.containsKey("tinhChat") && NHOM_VAT_TU.equals(d.getNhom())) {
-            String moi = chuanHoaTinhChat(chuoi(td.get("tinhChat")));
-            if (!moi.equals(d.getTinhChat())) {
-                d.setTinhChat(moi);
-                // Vật tư đang thuộc loại này đổi tính chất theo, để cột loai không lệch
-                vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc().stream()
-                        .filter(v -> id.equals(v.getDanhMucId()))
-                        .forEach(v -> { v.setLoai(moi); vatTuRepo.save(v); });
+                d.setTen(ten);
             }
-        }
-        return repo.save(d);
+            if (td.containsKey("moTa")) d.setMoTa(chuoi(td.get("moTa")));
+            if (td.containsKey("icon")) d.setIcon(chuoi(td.get("icon")));
+            if (td.containsKey("thuTu")) d.setThuTu(so(td.get("thuTu")));
+            if (td.containsKey("dangHien")) {
+                d.setDangHien(Boolean.parseBoolean(String.valueOf(td.get("dangHien"))));
+            }
+            if (td.containsKey("tinhChat") && NHOM_VAT_TU.equals(d.getNhom())) {
+                String moi = chuanHoaTinhChat(chuoi(td.get("tinhChat")));
+                if (!moi.equals(d.getTinhChat())) {
+                    d.setTinhChat(moi);
+                    // Vật tư đang thuộc loại này đổi tính chất theo, để cột loai không lệch — MỘT lệnh UPDATE
+                    jdbc.update("update vat_tu set loai = ?, updated_at = now() "
+                            + "where danh_muc_id = ? and is_deleted = false", moi, id);
+                }
+            }
+            return d;
+        });
+        return traDanhMuc(id, daSua);
     }
 
     /**
      * XOÁ MỀM. Sản phẩm / vật tư đang thuộc được gỡ liên kết chứ không xoá theo.
      * Vật tư giữ nguyên cột loai nên kho vẫn tính gram, tính vốn máy như cũ.
+     * Cả ba việc (xoá danh mục, gỡ vật tư HOẶC gỡ sản phẩm tuỳ nhóm) trong MỘT câu lệnh.
      */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Transactional
     public void xoa(@PathVariable Long id) {
-        DanhMuc d = timHoacBao(id);
-        if (NHOM_VAT_TU.equals(d.getNhom())) {
-            vatTuRepo.findByDaXoaFalseOrderByLoaiAscIdAsc().stream()
-                    .filter(v -> id.equals(v.getDanhMucId()))
-                    .forEach(v -> { v.setDanhMucId(null); vatTuRepo.save(v); });
-        } else {
-            sanPhamRepo.findByDaXoaFalseOrderByIdAsc().stream()
-                    .filter(sp -> id.equals(sp.getDanhMucId()))
-                    .forEach(sp -> { sp.setDanhMucId(null); sanPhamRepo.save(sp); });
+        Long soDong = jdbc.queryForObject(
+                "with d as (update danh_muc set is_deleted = true, updated_at = now() where id = ? returning nhom), "
+                + "vt as (update vat_tu set danh_muc_id = null, updated_at = now() "
+                + "       where danh_muc_id = ? and is_deleted = false "
+                + "         and exists (select 1 from d where d.nhom = 'vat_tu')), "
+                + "sp as (update san_pham set danh_muc_id = null, updated_at = now() "
+                + "       where danh_muc_id = ? and is_deleted = false "
+                + "         and exists (select 1 from d where d.nhom <> 'vat_tu')) "
+                + "select count(*) from d", Long.class, id, id, id);
+        if (soDong == null || soDong == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy danh mục.");
         }
-        d.xoaMem();
-        repo.save(d);
+        boNho.xoaVaNapLai(BoNhoDem.DM, BoNhoDem.VT, BoNhoDem.SP);
     }
 
     @PutMapping("/{id}/khoi-phuc")
-    public DanhMuc khoiPhuc(@PathVariable Long id) {
-        DanhMuc d = timHoacBao(id);
-        d.khoiPhuc();
-        return repo.save(d);
+    public Map<String, Object> khoiPhuc(@PathVariable Long id) {
+        if (jdbc.update("update danh_muc set is_deleted = false, updated_at = now() where id = ?", id) == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy danh mục.");
+        }
+        return traDanhMuc(id, null);
+    }
+
+    /**
+     * Đã commit: nạp lại danh mục + kho + sản phẩm (hai bảng kia hiện tên danh mục) rồi trả dòng danh sách.
+     *
+     * Nạp lại lỗi (Supabase chớp một nhịp) thì KHÔNG đọc lại bộ nhớ đệm nữa: đọc là mở thêm
+     * một lượt nạp, lỗi lần hai thì ném ra ngoài và lệnh ghi ĐÃ COMMIT lại thành lỗi 500 —
+     * chủ shop bấm Lưu lại là có hai danh mục trùng. Trả luôn dòng vừa ghi trong transaction.
+     *
+     * @param duPhong dòng vừa ghi, null nếu nơi gọi không có (chỉ chạy một lệnh UPDATE)
+     */
+    private Map<String, Object> traDanhMuc(Long id, DanhMuc duPhong) {
+        if (boNho.xoaVaNapLai(BoNhoDem.DM, BoNhoDem.VT, BoNhoDem.SP)) {
+            try {
+                DanhMuc d = boNho.danhMuc().theoId().get(id);
+                if (d != null) return DanhMucDto.tao(d);
+            } catch (RuntimeException boQua) {
+                // rơi xuống dùng bản dự phòng
+            }
+        }
+        return duPhong == null ? null : DanhMucDto.tao(duPhong);
     }
 
     /** Tính chất trống -> dung_cu; ngoài danh sách -> báo lỗi rõ. */

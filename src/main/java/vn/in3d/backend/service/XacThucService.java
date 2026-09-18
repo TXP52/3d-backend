@@ -2,6 +2,7 @@ package vn.in3d.backend.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,7 +24,9 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Xác thực người dùng: đăng ký (BCrypt), đăng nhập (phát token HMAC), đọc token.
+ * Xác thực người dùng: đăng ký (BCrypt), đăng nhập (phát token HMAC), đọc token,
+ * và DANH BẠ KHÁCH HÀNG chủ shop tự nhập ở trang quản trị (cùng bảng nguoi_dung,
+ * chỉ khác là chưa có mật khẩu nên chưa đăng nhập được).
  * Token dạng: base64url(email|vaiTro|hạn) + "." + base64url(HMAC-SHA256(payload, secret))
  */
 @Service
@@ -36,6 +39,8 @@ public class XacThucService {
     private final NguoiDungRepository nguoiDungRepo;
     private final MaOtpRepository maOtpRepo;
     private final EmailService emailService;
+    private final BoNhoDem boNho;
+    private final JdbcTemplate jdbc;
     private final BCryptPasswordEncoder maHoa = new BCryptPasswordEncoder();
     private final SecureRandom random = new SecureRandom();
     private final String secret;
@@ -45,11 +50,15 @@ public class XacThucService {
     public XacThucService(NguoiDungRepository nguoiDungRepo,
                           MaOtpRepository maOtpRepo,
                           EmailService emailService,
+                          BoNhoDem boNho,
+                          JdbcTemplate jdbc,
                           @Value("${in3d.auth.secret:doi-secret-nay-khi-len-production}") String secret,
                           @Value("${in3d.admin.email:txp5201aquarius@gmail.com}") String adminEmail) {
         this.nguoiDungRepo = nguoiDungRepo;
         this.maOtpRepo = maOtpRepo;
         this.emailService = emailService;
+        this.boNho = boNho;
+        this.jdbc = jdbc;
         this.secret = secret;
         this.adminEmail = adminEmail.trim().toLowerCase();
     }
@@ -209,13 +218,121 @@ public class XacThucService {
         if (Long.parseLong(truong[2]) < System.currentTimeMillis()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Phiên đăng nhập đã hết hạn, hãy đăng nhập lại");
         }
+        // Tra tài khoản trong bộ nhớ đệm (mọi request có token khỏi một lượt hỏi database);
+        // không thấy mới hỏi database — phòng tài khoản vừa thêm tay trên Supabase
+        NguoiDung daBiet = boNho.nguoiDungTheoEmail(truong[0]);
+        if (daBiet != null) return daBiet;
         Optional<NguoiDung> nd = nguoiDungRepo.findByEmailIgnoreCase(truong[0]);
         if (nd.isEmpty()) loi401();
         return nd.get();
     }
 
+    /** Danh sách tài khoản chưa xoá (từ bộ nhớ đệm). */
     public List<NguoiDung> danhSachNguoiDung() {
-        return nguoiDungRepo.findByDaXoaFalseOrderByIdAsc();
+        return boNho.dsNguoiDung();
+    }
+
+    /* ============================================================
+       KHÁCH HÀNG chủ shop tự nhập ở trang quản trị
+       ============================================================ */
+
+    /**
+     * Thêm khách vào danh bạ: một dòng nguoi_dung vai_tro = khach_hang, KHÔNG có mật
+     * khẩu nên chưa đăng nhập được — chỉ để nhớ số điện thoại / địa chỉ và gắn đơn.
+     * Email không bắt buộc (khách Facebook / Zalo thường không cho); có thì phải
+     * đúng dạng và chưa ai dùng, để trống thì lưu NULL (nhiều dòng NULL vẫn hợp lệ).
+     */
+    @Transactional
+    public NguoiDung themKhachHang(Map<String, Object> td) {
+        NguoiDung nd = new NguoiDung();
+        nd.setHoTen(hoTenHopLe(chuoi(td.get("hoTen"))));
+        nd.setSoDienThoai(trongThanhNull(chuoi(td.get("soDienThoai"))));
+        nd.setEmail(emailHopLe(chuoi(td.get("email")), null));
+        nd.setDiaChi(trongThanhNull(chuoi(td.get("diaChi"))));
+        nd.setGhiChu(trongThanhNull(chuoi(td.get("ghiChu"))));
+        nd.setVaiTro("khach_hang");
+        return nguoiDungRepo.save(nd);
+    }
+
+    /** Sửa khách: khoá nào không gửi thì để yên. Tài khoản quản trị thì không đụng vào. */
+    @Transactional
+    public NguoiDung suaKhachHang(Long id, Map<String, Object> td) {
+        NguoiDung nd = nguoiDungRepo.findById(id).orElseThrow(this::khongThayKhach);
+        if (nd.getDaXoa()) throw khongThayKhach();
+        kiemTraKhongPhaiAdmin(nd);
+        if (td.containsKey("hoTen")) nd.setHoTen(hoTenHopLe(chuoi(td.get("hoTen"))));
+        if (td.containsKey("soDienThoai")) nd.setSoDienThoai(trongThanhNull(chuoi(td.get("soDienThoai"))));
+        if (td.containsKey("email")) nd.setEmail(emailHopLe(chuoi(td.get("email")), id));
+        if (td.containsKey("diaChi")) nd.setDiaChi(trongThanhNull(chuoi(td.get("diaChi"))));
+        if (td.containsKey("ghiChu")) nd.setGhiChu(trongThanhNull(chuoi(td.get("ghiChu"))));
+        // nd đang được quản lý trong transaction: commit tự ghi phần thay đổi
+        return nd;
+    }
+
+    /**
+     * XOÁ MỀM khách. Điều kiện vai_tro nằm luôn trong câu UPDATE: bộ nhớ đệm có cũ
+     * một nhịp thì tài khoản quản trị vẫn không xoá được.
+     */
+    public void xoaKhachHang(Long id) {
+        NguoiDung nd = timKhach(id);
+        kiemTraKhongPhaiAdmin(nd);
+        if (jdbc.update("update nguoi_dung set is_deleted = true, updated_at = now() "
+                + "where id = ? and vai_tro <> 'admin'", id) == 0) {
+            throw khongThayKhach();
+        }
+    }
+
+    /** Khách chưa xoá trong bộ nhớ đệm; không có thì 404. */
+    private NguoiDung timKhach(Long id) {
+        for (NguoiDung nd : boNho.dsNguoiDung()) {
+            if (nd.getId().equals(id)) return nd;
+        }
+        throw khongThayKhach();
+    }
+
+    private void kiemTraKhongPhaiAdmin(NguoiDung nd) {
+        if ("admin".equals(nd.getVaiTro())
+                || (nd.getEmail() != null && adminEmail.equalsIgnoreCase(nd.getEmail().trim()))) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Đây là tài khoản quản trị, không sửa hay xoá ở trang khách hàng được.");
+        }
+    }
+
+    private ResponseStatusException khongThayKhach() {
+        return new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy khách hàng.");
+    }
+
+    private String hoTenHopLe(String hoTen) {
+        if (hoTen == null || hoTen.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Vui lòng nhập họ và tên");
+        }
+        return hoTen.trim();
+    }
+
+    /**
+     * Email của khách: để trống thì NULL, có thì phải đúng dạng và chưa tài khoản nào
+     * dùng (kể cả tài khoản đã xoá mềm — cột email là khoá duy nhất của cả bảng).
+     *
+     * @param boQuaId id của chính khách đang sửa (gửi lại email cũ thì không phải lỗi)
+     */
+    private String emailHopLe(String email, Long boQuaId) {
+        String mail = email == null ? "" : email.trim();
+        if (mail.isEmpty()) return null;
+        if (!mail.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) loi400("Email không hợp lệ");
+        String thuong = mail.toLowerCase();
+        NguoiDung daCo = nguoiDungRepo.findByEmailIgnoreCase(thuong).orElse(null);
+        if (daCo != null && (boQuaId == null || !daCo.getId().equals(boQuaId))) {
+            loi400("Email này đã được dùng cho tài khoản khác.");
+        }
+        return thuong;
+    }
+
+    private static String chuoi(Object v) {
+        return v == null ? null : String.valueOf(v);
+    }
+
+    private static String trongThanhNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     private String phatToken(NguoiDung nd) {

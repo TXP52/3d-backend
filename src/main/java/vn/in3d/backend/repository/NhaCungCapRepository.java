@@ -10,4 +10,7 @@ public interface NhaCungCapRepository extends JpaRepository<NhaCungCap, Long> {
     Optional<NhaCungCap> findByTenIgnoreCase(String ten);
 
     List<NhaCungCap> findByDaXoaFalseOrderByIdAsc();
+
+    /** MỌI nhà cung cấp kể cả đã xoá — bộ nhớ đệm nạp một lượt rồi tự lọc. */
+    List<NhaCungCap> findAllByOrderByIdAsc();
 }

@@ -2,7 +2,10 @@ package vn.in3d.backend.entity;
 
 import jakarta.persistence.*;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Đơn hàng — ánh xạ bảng public.don_hang (trùng schema Supabase). */
 @Entity
@@ -12,6 +15,25 @@ public class DonHang extends BanGhi {
     /** Các trạng thái đơn hợp lệ (trùng ràng buộc CHECK trong schema.sql). */
     public static final List<String> TRANG_THAI_HOP_LE =
             List.of("cho_xac_nhan", "dang_xu_ly", "dang_giao", "hoan_thanh", "da_huy");
+
+    /** Đơn đang HUỶ thì không giữ hàng: kho đã được trả lại (xem DonHangService). */
+    public static final String DA_HUY = "da_huy";
+
+    /**
+     * Kênh bán hợp lệ và tên hiển thị — đơn từ web luôn là website.
+     * LinkedHashMap chứ không Map.of: Map.of đảo thứ tự khoá mỗi lần chạy lại máy ảo Java,
+     * mà thứ tự này còn đi vào câu báo lỗi "Hợp lệ: ...".
+     */
+    public static final Map<String, String> KENH_HOP_LE;
+    static {
+        Map<String, String> kenh = new LinkedHashMap<>();
+        kenh.put("website", "Website");
+        kenh.put("facebook", "Facebook");
+        kenh.put("zalo", "Zalo");
+        kenh.put("tai_shop", "Tại shop");
+        kenh.put("khac", "Khác");
+        KENH_HOP_LE = Collections.unmodifiableMap(kenh);
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -62,10 +84,20 @@ public class DonHang extends BanGhi {
     @Column(name = "trang_thai", nullable = false)
     private String trangThai = "cho_xac_nhan";
 
+    /**
+     * Bán qua đâu: website | facebook | zalo | tai_shop | khac.
+     * Đơn khách tự đặt trên web luôn là website; đơn chủ shop gõ tay thì chọn kênh.
+     */
+    @Column(name = "kenh", nullable = false, length = 20)
+    private String kenh = "website";
+
+    // Xếp theo id để danh sách món / thanh toán luôn cùng thứ tự dù nạp kiểu nào
     @OneToMany(mappedBy = "donHang", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id")
     private List<DonHangChiTiet> chiTiet = new ArrayList<>();
 
     @OneToMany(mappedBy = "donHang", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id")
     private List<ThanhToan> thanhToan = new ArrayList<>();
 
     public void themChiTiet(DonHangChiTiet ct) {
@@ -115,6 +147,12 @@ public class DonHang extends BanGhi {
     public Long getTongGiam() { return getTienGiam() + getTienGiamSanPham(); }
     public String getTrangThai() { return trangThai; }
     public void setTrangThai(String trangThai) { this.trangThai = trangThai; }
+    public String getKenh() { return kenh == null || kenh.isBlank() ? "website" : kenh; }
+    public void setKenh(String kenh) { this.kenh = kenh == null || kenh.isBlank() ? "website" : kenh; }
+
+    /** Tên kênh cho trang quản trị khỏi phải tự dịch; kênh lạ thì trả nguyên chuỗi. */
+    @Transient
+    public String getKenhTen() { return KENH_HOP_LE.getOrDefault(getKenh(), getKenh()); }
     public List<DonHangChiTiet> getChiTiet() { return chiTiet; }
     public List<ThanhToan> getThanhToan() { return thanhToan; }
 }

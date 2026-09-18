@@ -1,10 +1,13 @@
 package vn.in3d.backend.web;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import vn.in3d.backend.entity.BaiViet;
 import vn.in3d.backend.repository.BaiVietRepository;
+import vn.in3d.backend.service.BoNhoDem;
 
 import java.text.Normalizer;
 import java.util.List;
@@ -23,9 +26,15 @@ public class BaiVietController {
             Set.of("huong-dan", "vat-lieu", "kinh-nghiem", "tin-shop");
 
     private final BaiVietRepository repo;
+    private final BoNhoDem boNho;
+    private final TransactionTemplate giaoDich;
+    private final JdbcTemplate jdbc;
 
-    public BaiVietController(BaiVietRepository repo) {
+    public BaiVietController(BaiVietRepository repo, BoNhoDem boNho, TransactionTemplate giaoDich, JdbcTemplate jdbc) {
         this.repo = repo;
+        this.boNho = boNho;
+        this.giaoDich = giaoDich;
+        this.jdbc = jdbc;
     }
 
     /**
@@ -33,33 +42,41 @@ public class BaiVietController {
      */
     @GetMapping
     public List<BaiViet> danhSach(@RequestParam(required = false, defaultValue = "false") boolean tatCa) {
-        return tatCa ? repo.findByDaXoaFalseOrderByThuTuAscIdDesc()
-                     : repo.findByHienThiTrueAndDaXoaFalseOrderByThuTuAscIdDesc();
+        return boNho.dsBaiViet(tatCa);
     }
 
     @GetMapping("/thung-rac")
     public List<BaiViet> thungRac() {
-        return repo.findByDaXoaTrueOrderByIdDesc();
+        return boNho.baiViet().thungRac();
     }
 
     @GetMapping("/{id}")
     public BaiViet mot(@PathVariable Long id) {
-        return repo.findById(id).orElseThrow(this::khongThay);
+        BaiViet b = boNho.baiViet().theoId().get(id);
+        if (b == null) throw khongThay();
+        return b;
     }
 
     /** Mở bài theo đường dẫn thân thiện: /api/bai-viet/duong-dan/chon-nhua-pla-petg-abs */
     @GetMapping("/duong-dan/{duongDan}")
     public BaiViet theoDuongDan(@PathVariable String duongDan) {
-        return repo.findByDuongDanAndDaXoaFalse(duongDan).orElseThrow(this::khongThay);
+        BaiViet b = boNho.baiViet().theoDuongDan().get(duongDan);
+        if (b == null) throw khongThay();
+        return b;
     }
 
-    /** Đếm lượt đọc — tách riêng để GET không ghi vào database. */
+    /**
+     * Đếm lượt đọc — tách riêng để GET không ghi vào database.
+     * MỘT lệnh UPDATE cộng dồn ngay trong database: hai người đọc cùng lúc không mất lượt.
+     * Không xoá bộ nhớ đệm (mỗi lượt đọc mà nạp lại bài viết thì phí); số lượt xem
+     * trong danh sách cập nhật ở lần nạp lại kế tiếp.
+     */
     @PostMapping("/{id}/luot-xem")
     public Map<String, Object> tangLuotXem(@PathVariable Long id) {
-        BaiViet b = repo.findById(id).orElseThrow(this::khongThay);
-        b.setLuotXem(b.getLuotXem() + 1);
-        repo.save(b);
-        return Map.of("id", b.getId(), "luotXem", b.getLuotXem());
+        List<Integer> luotXem = jdbc.queryForList(
+                "update bai_viet set luot_xem = luot_xem + 1 where id = ? returning luot_xem", Integer.class, id);
+        if (luotXem.isEmpty()) throw khongThay();
+        return Map.of("id", id, "luotXem", luotXem.get(0));
     }
 
     @PostMapping
@@ -73,55 +90,84 @@ public class BaiVietController {
         b.setTieuDe(b.getTieuDe().trim());
         kiemTraChuyenMuc(b.getChuyenMuc());
         b.setDuongDan(duongDanDuyNhat(b.getDuongDan(), b.getTieuDe(), null));
-        return repo.save(b);
+        BaiViet daLuu = repo.save(b);
+        return traBaiViet(daLuu.getId(), daLuu);
     }
 
+    /** Sửa trong MỘT transaction: đọc + UPDATE + COMMIT (bản cũ đọc rồi merge riêng: 5-6 lượt đi-về). */
     @PutMapping("/{id}")
     public BaiViet sua(@PathVariable Long id, @RequestBody Map<String, Object> td) {
-        BaiViet b = repo.findById(id).orElseThrow(this::khongThay);
+        BaiViet daSua = giaoDich.execute(gd -> {
+            BaiViet b = repo.findById(id).orElseThrow(this::khongThay);
 
-        if (td.containsKey("tieuDe")) {
-            String t = String.valueOf(td.get("tieuDe")).trim();
-            if (t.isEmpty()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tiêu đề bài viết không được để trống.");
+            if (td.containsKey("tieuDe")) {
+                String t = String.valueOf(td.get("tieuDe")).trim();
+                if (t.isEmpty()) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tiêu đề bài viết không được để trống.");
+                }
+                b.setTieuDe(t);
             }
-            b.setTieuDe(t);
-        }
-        if (td.containsKey("duongDan") || td.containsKey("tieuDe")) {
-            String moi = td.containsKey("duongDan") ? chuoi(td.get("duongDan")) : b.getDuongDan();
-            b.setDuongDan(duongDanDuyNhat(moi, b.getTieuDe(), b.getId()));
-        }
-        if (td.containsKey("tomTat")) b.setTomTat(chuoi(td.get("tomTat")));
-        if (td.containsKey("noiDung")) b.setNoiDung(chuoi(td.get("noiDung")));
-        if (td.containsKey("hinhAnh")) b.setHinhAnh(chuoi(td.get("hinhAnh")));
-        if (td.containsKey("tacGia")) b.setTacGia(chuoi(td.get("tacGia")));
-        if (td.containsKey("chuyenMuc")) {
-            String cm = chuoi(td.get("chuyenMuc"));
-            kiemTraChuyenMuc(cm);
-            b.setChuyenMuc(cm);
-        }
-        if (td.containsKey("hienThi")) b.setHienThi(Boolean.parseBoolean(String.valueOf(td.get("hienThi"))));
-        if (td.containsKey("thuTu")) b.setThuTu(so(td.get("thuTu")));
-        return repo.save(b);
+            if (td.containsKey("duongDan") || td.containsKey("tieuDe")) {
+                String moi = td.containsKey("duongDan") ? chuoi(td.get("duongDan")) : b.getDuongDan();
+                b.setDuongDan(duongDanDuyNhat(moi, b.getTieuDe(), b.getId(), b.getDuongDan()));
+            }
+            if (td.containsKey("tomTat")) b.setTomTat(chuoi(td.get("tomTat")));
+            if (td.containsKey("noiDung")) b.setNoiDung(chuoi(td.get("noiDung")));
+            if (td.containsKey("hinhAnh")) b.setHinhAnh(chuoi(td.get("hinhAnh")));
+            if (td.containsKey("tacGia")) b.setTacGia(chuoi(td.get("tacGia")));
+            if (td.containsKey("chuyenMuc")) {
+                String cm = chuoi(td.get("chuyenMuc"));
+                kiemTraChuyenMuc(cm);
+                b.setChuyenMuc(cm);
+            }
+            if (td.containsKey("hienThi")) b.setHienThi(Boolean.parseBoolean(String.valueOf(td.get("hienThi"))));
+            if (td.containsKey("thuTu")) b.setThuTu(so(td.get("thuTu")));
+            // b đang được quản lý trong transaction: commit tự ghi, khỏi gọi save
+            return b;
+        });
+        return traBaiViet(id, daSua);
     }
 
-    /** XOÁ MỀM: bài vẫn nằm trong database, vào thùng rác khôi phục được. */
+    /** XOÁ MỀM: bài vẫn nằm trong database, vào thùng rác khôi phục được. MỘT lệnh UPDATE. */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void xoa(@PathVariable Long id) {
-        BaiViet b = repo.findById(id).orElseThrow(this::khongThay);
-        b.xoaMem();
-        repo.save(b);
+        if (jdbc.update("update bai_viet set is_deleted = true, updated_at = now() where id = ?", id) == 0) {
+            throw khongThay();
+        }
+        boNho.xoaVaNapLai(BoNhoDem.BV);
     }
 
     @PutMapping("/{id}/khoi-phuc")
     public BaiViet khoiPhuc(@PathVariable Long id) {
-        BaiViet b = repo.findById(id).orElseThrow(this::khongThay);
-        b.khoiPhuc();
-        return repo.save(b);
+        if (jdbc.update("update bai_viet set is_deleted = false, updated_at = now() where id = ?", id) == 0) {
+            throw khongThay();
+        }
+        return traBaiViet(id, null);
     }
 
     // ---------------- Tiện ích ----------------
+
+    /**
+     * Đã commit: nạp lại bài viết rồi trả đúng dòng danh sách từ bộ nhớ đệm.
+     *
+     * Nạp lại lỗi (Supabase chớp một nhịp) thì KHÔNG đọc lại bộ nhớ đệm nữa: đọc là mở thêm
+     * một lượt nạp, lỗi lần hai thì ném ra ngoài và lệnh ghi ĐÃ COMMIT lại thành lỗi 500 —
+     * bấm Lưu lại là có hai bài trùng. Trả luôn bài vừa ghi trong transaction.
+     *
+     * @param duPhong bài vừa ghi, null nếu nơi gọi không có (chỉ chạy một lệnh UPDATE)
+     */
+    private BaiViet traBaiViet(Long id, BaiViet duPhong) {
+        if (boNho.xoaVaNapLai(BoNhoDem.BV)) {
+            try {
+                BaiViet b = boNho.baiViet().theoId().get(id);
+                if (b != null) return b;
+            } catch (RuntimeException boQua) {
+                // rơi xuống dùng bản dự phòng
+            }
+        }
+        return duPhong;
+    }
 
     private ResponseStatusException khongThay() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy bài viết.");
@@ -140,8 +186,17 @@ public class BaiVietController {
      * khi trùng với bài khác (đường dẫn là khoá duy nhất trong database).
      */
     private String duongDanDuyNhat(String mongMuon, String tieuDe, Long boQuaId) {
+        return duongDanDuyNhat(mongMuon, tieuDe, boQuaId, null);
+    }
+
+    /**
+     * @param hienTai đường dẫn bài đang sửa đang giữ: kết quả trùng đúng nó thì khỏi hỏi
+     *                database — cột duong_dan là khoá duy nhất nên chẳng bài nào khác có được.
+     */
+    private String duongDanDuyNhat(String mongMuon, String tieuDe, Long boQuaId, String hienTai) {
         String goc = khongDau(mongMuon == null || mongMuon.isBlank() ? tieuDe : mongMuon);
         if (goc.isEmpty()) goc = "bai-viet";
+        if (boQuaId != null && goc.equals(hienTai)) return goc;
         String thu = goc;
         int n = 2;
         while (biTrung(thu, boQuaId)) {

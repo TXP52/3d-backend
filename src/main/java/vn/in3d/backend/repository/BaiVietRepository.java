@@ -16,6 +16,9 @@ public interface BaiVietRepository extends JpaRepository<BaiViet, Long> {
 
     List<BaiViet> findByDaXoaTrueOrderByIdDesc();
 
+    /** MỌI bài kể cả đã xoá, theo thứ tự trang quản trị — bộ nhớ đệm chia ra danh sách và thùng rác. */
+    List<BaiViet> findAllByOrderByThuTuAscIdDesc();
+
     Optional<BaiViet> findByDuongDanAndDaXoaFalse(String duongDan);
 
     boolean existsByDuongDanAndDaXoaFalse(String duongDan);
