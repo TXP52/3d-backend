@@ -214,14 +214,22 @@ public class TongHopQuanTri {
     /**
      * Khách trong bảng nguoi_dung (tự đăng ký HOẶC chủ shop nhập tay) ghép với đơn theo
      * don_hang.nguoi_dung_id (bản JS cũ ghép theo HỌ TÊN nên hai người trùng tên bị gộp).
-     * Khách vãng lai gom theo số điện thoại (không có số thì theo tên). Đơn của tài khoản
-     * đã xoá tính như khách vãng lai.
+     * Đơn không gắn tài khoản nào (hoặc gắn tài khoản đã xoá) mà số điện thoại trùng ĐÚNG MỘT
+     * khách trong bảng (so sau khi bỏ dấu cách / chấm / gạch, +84 coi như 0) thì tính cho
+     * khách đó — nên bấm "Thêm khách vào danh bạ" ở một dòng khách lẻ không đẻ ra dòng trùng.
+     * Còn lại là khách vãng lai, gom theo số điện thoại (không có số thì theo tên).
      * Khách trong bảng trước (id tăng dần, kể cả người CHƯA có đơn nào), khách vãng lai
-     * sau (mua gần nhất trước). laTaiKhoan = có dòng trong nguoi_dung nên sửa / xoá được.
+     * sau (mua gần nhất trước). laTaiKhoan = có dòng trong nguoi_dung nên sửa / xoá được;
+     * coMatKhau = khách tự đăng ký (có mật khẩu, email là tên đăng nhập), false = khách chủ
+     * shop nhập tay vào danh bạ hoặc khách vãng lai.
      */
     public Map<String, Object> khachHang() {
         List<DonHang> don = boNho.dsDonHang();
         Map<Long, Map<String, Object>> theoTaiKhoan = new LinkedHashMap<>();
+        // Số điện thoại (đã chuẩn hoá) -> các dòng khách trong bảng mang số đó. Bỏ tài khoản
+        // quản trị: đơn chủ shop tự đặt thử bằng số của mình không phải khách mua
+        Map<String, List<Map<String, Object>>> theoSdt = new HashMap<>();
+        int coMatKhau = 0;
         for (NguoiDung u : boNho.dsNguoiDung()) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("khoa", "nd-" + u.getId());
@@ -239,12 +247,25 @@ public class TongHopQuanTri {
             m.put("diaChi", trongThanhNull(u.getDiaChi()));
             m.put("ghiChu", trongThanhNull(u.getGhiChu()));
             m.put("laTaiKhoan", true);
+            boolean matKhau = trongThanhNull(u.getMatKhauHash()) != null;
+            m.put("coMatKhau", matKhau);
+            if (matKhau) coMatKhau++;
             theoTaiKhoan.put(u.getId(), m);
+            String sdt = chuanSoDienThoai(u.getSoDienThoai());
+            if (sdt != null && !"admin".equals(u.getVaiTro())) {
+                theoSdt.computeIfAbsent(sdt, k -> new ArrayList<>()).add(m);
+            }
         }
 
         Map<String, Map<String, Object>> vangLai = new LinkedHashMap<>();
         for (DonHang d : don) {   // mới nhất trước
             Map<String, Object> m = d.getNguoiDungId() == null ? null : theoTaiKhoan.get(d.getNguoiDungId());
+            if (m == null) {
+                // Đơn không gắn tài khoản: số điện thoại trùng đúng MỘT khách trong bảng thì tính
+                // cho khách đó (trùng từ hai khách trở lên thì không đoán, để là khách vãng lai)
+                List<Map<String, Object>> cungSo = theoSdt.get(chuanSoDienThoai(d.getSoDienThoai()));
+                if (cungSo != null && cungSo.size() == 1) m = cungSo.get(0);
+            }
             if (m != null) {
                 if (m.get("soDienThoai") == null) m.put("soDienThoai", trongThanhNull(d.getSoDienThoai()));
             } else {
@@ -269,6 +290,7 @@ public class TongHopQuanTri {
                     m.put("diaChi", trongThanhNull(d.getDiaChi()));   // địa chỉ ở đơn gần nhất
                     m.put("ghiChu", null);
                     m.put("laTaiKhoan", false);                       // chưa có dòng trong nguoi_dung
+                    m.put("coMatKhau", false);
                     vangLai.put(khoa, m);
                 }
             }
@@ -290,7 +312,9 @@ public class TongHopQuanTri {
 
         Map<String, Object> kpi = new LinkedHashMap<>();
         kpi.put("tongKhach", khach.size());
-        kpi.put("daDangKy", theoTaiKhoan.size());
+        // Tài khoản khách TỰ đăng ký (có mật khẩu) tách khỏi khách chủ shop nhập tay vào danh bạ
+        kpi.put("daDangKy", coMatKhau);
+        kpi.put("danhBa", theoTaiKhoan.size() - coMatKhau);
         kpi.put("vangLai", vangLai.size());
         kpi.put("tongChiTieu", tongChi);
 
@@ -451,7 +475,7 @@ public class TongHopQuanTri {
             else theoDanhMucId.merge(dm, 1, Integer::sum);
 
             int ton = soNguyen(p.get("tonKho"));
-            long giaTri = so(p.get("gia")) * ton;
+            long giaTri = giaTriTonKho(p, ton);
             giaTriTon += giaTri;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", p.get("id"));
@@ -480,6 +504,21 @@ public class TongHopQuanTri {
         ra.put("chuaPhanLoai", chuaPhanLoai);
         ra.put("theoSanPham", theoSanPham);
         return ra;
+    }
+
+    /**
+     * Giá trị tồn của một sản phẩm = Σ (giá hiển thị của biến thể × tồn kho biến thể) — mỗi
+     * phân loại có thể có giá riêng; cùng công thức tóm tắt ở form sản phẩm (san-pham.html
+     * veTomTatSp), tồn âm thì trừ ngược lại y như ở đó. Sản phẩm chưa có biến thể nào (chỉ
+     * khi sửa tay trên database) thì giá sản phẩm × tổng tồn như trước.
+     */
+    private static long giaTriTonKho(Map<String, Object> p, int tongTon) {
+        if (!(p.get("bienThe") instanceof List<?> ds) || ds.isEmpty()) return so(p.get("gia")) * tongTon;
+        long giaTri = 0;
+        for (Object o : ds) {
+            if (o instanceof Map<?, ?> bt) giaTri += so(bt.get("giaHienThi")) * soNguyen(bt.get("tonKho"));
+        }
+        return giaTri;
     }
 
     /* ============================================================
@@ -958,5 +997,17 @@ public class TongHopQuanTri {
 
     private static String trongThanhNull(String s) {
         return s == null || s.isBlank() ? null : s.trim();
+    }
+
+    /**
+     * Số điện thoại để SO KHỚP (không để hiển thị): chỉ giữ chữ số, "84..." của +84 đổi
+     * thành "0..." — "0912 345 678", "0912.345.678" và "+84 912 345 678" là một người.
+     * Không có chữ số nào thì null.
+     */
+    static String chuanSoDienThoai(String s) {
+        if (s == null) return null;
+        String so = s.replaceAll("\\D", "");
+        if (so.startsWith("84") && so.length() >= 11) so = "0" + so.substring(2);
+        return so.isEmpty() ? null : so;
     }
 }

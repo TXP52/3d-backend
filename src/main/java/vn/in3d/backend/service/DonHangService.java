@@ -1,5 +1,7 @@
 package vn.in3d.backend.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -39,6 +41,8 @@ import java.util.concurrent.ThreadLocalRandom;
 @Service
 public class DonHangService {
 
+    private static final Logger log = LoggerFactory.getLogger(DonHangService.class);
+
     /** Cách thanh toán database nhận (ràng buộc CHECK của bảng thanh_toan). */
     private static final Set<String> PHUONG_THUC_HOP_LE = Set.of("cod", "chuyen_khoan", "vi_dien_tu", "the");
 
@@ -70,11 +74,12 @@ public class DonHangService {
      * @param id         id SẢN PHẨM
      * @param gia        giá của BIẾN THỂ đã chọn (biến thể để trống giá thì là giá sản phẩm)
      * @param bienTheId  biến thể sẽ bị trừ kho; null = món không gắn biến thể nào
-     * @param tenBienThe tên phân loại, null với sản phẩm không phân loại
+     * @param tenBienThe tên phân loại (xem tenPhanLoai), null với sản phẩm không phân loại
      * @param hetHang    trạng thái của biến thể (hoặc của sản phẩm) đang là "hết hàng"
+     * @param dangBan    sản phẩm đang bật bán (dangBan); false = shop đang ẩn khỏi web khách
      */
     public record MonHang(Long id, String ten, long gia, String loaiSanPham, String hinhAnh,
-                          Long bienTheId, String tenBienThe, boolean hetHang) {}
+                          Long bienTheId, String tenBienThe, boolean hetHang, boolean dangBan) {}
 
     /** Cách tra món hàng lúc tính giá — xem traTuBoNhoDem. */
     public interface TraMon {
@@ -172,8 +177,25 @@ public class DonHangService {
         String trangThai = bt != null ? (String) bt.get("trangThaiHienThi") : (String) sp.get("trangThai");
         return new MonHang((Long) sp.get("id"), (String) sp.get("ten"), gia,
                 (String) sp.get("loaiSanPham"), anh,
-                bt == null ? null : (Long) bt.get("id"), bt == null ? null : (String) bt.get("ten"),
-                "het_hang".equals(trangThai));
+                bt == null ? null : (Long) bt.get("id"), tenPhanLoai(sp, bt),
+                "het_hang".equals(trangThai), Boolean.TRUE.equals(sp.get("dangBan")));
+    }
+
+    /**
+     * Tên phân loại chụp vào dòng đơn (và trả ở báo giá): tên của biến thể. Biến thể KHÔNG
+     * đặt tên mà sản phẩm có từ hai phân loại trở lên thì lấy MÀU của nó (web khách cũng hiện
+     * "Tên — Đỏ" ở giỏ) — không thì chủ shop nhìn đơn không biết phải giao màu nào.
+     * Sản phẩm chỉ có một biến thể mặc định không tên: vẫn null như trước.
+     */
+    private static String tenPhanLoai(Map<String, Object> sp, Map<String, Object> bt) {
+        if (bt == null) return null;
+        Object ten = bt.get("ten");
+        if (ten != null && !String.valueOf(ten).isBlank()) return (String) ten;
+        if (sp.get("bienThe") instanceof List<?> ds && ds.size() > 1
+                && bt.get("mau") instanceof String mau && !mau.isBlank()) {
+            return mau;
+        }
+        return (String) ten;
     }
 
     /** Biến thể mặc định của sản phẩm — bienThe[] đã xếp mặc định lên đầu (xem SanPhamDto). */
@@ -200,13 +222,15 @@ public class DonHangService {
      *   - món có bienTheId -> theo biến thể đó (giá riêng của biến thể, kho của biến thể);
      *     biến thể đó không còn thì dòng hỏng luôn, KHÔNG dò tiếp sang sản phẩm / tên
      *   - không gửi bienTheId thì theo sanPhamId, không nữa thì tra theo TÊN (không phân
-     *     biệt hoa thường) như bản cũ; hai đường này lấy biến thể MẶC ĐỊNH của sản phẩm
+     *     biệt hoa thường) như bản cũ — trừ đơn gõ tay, dòng không id ở đó là món tự gõ;
+     *     hai đường này lấy biến thể MẶC ĐỊNH của sản phẩm
      *   - món tìm thấy: giá lấy từ database rồi trừ khuyến mãi sản phẩm tốt nhất
      *   - món không có trong bảng: đành theo giá gửi lên (không nhận giá âm)
      *   - món gửi kèm id mà tra không ra (đã xoá khỏi shop): coTheDat = false kèm lý do,
      *     KHÔNG rơi về giá 0 rồi tạo đơn 0₫
-     *   - hàng mẫu (loai = mau) chỉ trưng bày, phân loại đang "hết hàng" thì shop
-     *     không nhận đặt: coTheDat = false kèm lý do
+     *   - hàng mẫu (loai = mau) chỉ trưng bày, sản phẩm shop đang ẩn (dangBan = false) và
+     *     phân loại đang "hết hàng" thì shop không nhận đặt: coTheDat = false kèm lý do
+     *     (đơn gõ tay vẫn bán được hàng đang ẩn)
      *   - mã đơn hàng tính trên tổng tiền ĐÃ giảm giá món
      *
      * @param tra         cách tra món (traTuBoNhoDem)
@@ -238,7 +262,11 @@ public class DonHangService {
             }
             if (sp == null && !matBienThe) {
                 if (mh.sanPhamId() != null) sp = tra.theoSanPham(mh.sanPhamId());
-                if (sp == null && !tenGui.isEmpty()) sp = tra.theoTen(tenGui);
+                // Tra theo TÊN chỉ cho giỏ hàng cũ (chỉ mang tên món). Đơn gõ tay thì món chọn
+                // từ danh sách luôn kèm id, còn dòng "Món tự gõ" (không id) là món NGOÀI bảng
+                // sản phẩm: lỡ gõ trùng tên một sản phẩm cũng không được gắn vào sản phẩm đó
+                // rồi trừ kho của nó (hợp đồng mục 1: dòng tự gõ không đụng tới kho)
+                if (sp == null && !tenGui.isEmpty() && kieu != Kieu.DON_TAY) sp = tra.theoTen(tenGui);
             }
 
             long giaGoc = sp != null ? sp.gia() : giaGui;
@@ -254,8 +282,12 @@ public class DonHangService {
             // để nguyên thì giỏ hiện "Liên hệ" mà đơn thật lại thành một dòng 0₫.
             boolean khongConBan = sp == null && (mh.bienTheId() != null || mh.sanPhamId() != null);
             boolean hangMau = sp != null && "mau".equals(sp.loaiSanPham());
+            // Sản phẩm shop đang ẨN (dangBan = false) thì web khách không còn thấy, nên dòng giỏ
+            // đó là giỏ cũ: không nhận đặt (giống web khách tính coTheDat). Đơn gõ tay thì chủ
+            // shop vẫn bán được hàng đang ẩn.
+            boolean ngungBan = sp != null && !sp.dangBan() && kieu != Kieu.DON_TAY;
             boolean hetHang = sp != null && sp.hetHang();
-            boolean coTheDat = !khongConBan && !hangMau && !hetHang;
+            boolean coTheDat = !khongConBan && !hangMau && !ngungBan && !hetHang;
             String loi = null;
             if (khongConBan && matBienThe) {
                 loi = tenGui.isEmpty()
@@ -267,6 +299,8 @@ public class DonHangService {
                         : "\"" + tenGui + "\" shop không còn bán nữa, bạn xoá món này khỏi giỏ nhé.";
             } else if (hangMau) {
                 loi = "\"" + sp.ten() + "\" là hàng mẫu trưng bày, shop không nhận đặt món này.";
+            } else if (ngungBan) {
+                loi = "\"" + sp.ten() + "\" shop đang tạm ngừng bán, bạn xoá món này khỏi giỏ nhé.";
             } else if (hetHang) {
                 loi = "\"" + tenDayDu(sp) + "\" đang hết hàng, bạn chọn phân loại khác nhé.";
             } else if (soLuong <= 0) {
@@ -286,7 +320,11 @@ public class DonHangService {
                         : loi);
             }
 
-            DongGia d = new DongGia(sp != null ? sp.id() : null, sp != null ? sp.bienTheId() : null,
+            // Phân loại đã mất: trả lại đúng bienTheId giỏ gửi lên để giỏ biết dòng nào phải chọn
+            // lại (sanPhamId vẫn null như bản cũ). Chỉ báo giá tới được đây với dòng kiểu này —
+            // đặt hàng và đơn gõ tay đã 400 ở trên — nên id đó không bao giờ bị đem đi trừ kho.
+            Long bienTheId = sp != null ? sp.bienTheId() : (matBienThe ? mh.bienTheId() : null);
+            DongGia d = new DongGia(sp != null ? sp.id() : null, bienTheId,
                     sp != null ? sp.ten() : tenGui, sp != null ? sp.tenBienThe() : null,
                     sp != null ? sp.hinhAnh() : null, gia.giaGoc(), donGia, soLuong, coTheDat, loi);
             dsDong.add(d);
@@ -335,7 +373,8 @@ public class DonHangService {
      * Khách đặt hàng từ website.
      *
      * Lượt đi-về database: [đếm đơn cũ nếu mã chỉ cho khách mới] + INSERT đơn / từng
-     * món / thanh toán + [tăng lượt dùng mã] + trừ kho 2 câu + COMMIT. Sản phẩm và
+     * món / thanh toán + [tăng lượt dùng mã] + trừ kho 1 câu + COMMIT. Đồng bộ
+     * san_pham.ton_kho chạy NỀN sau commit, không bắt khách chờ (xem dongBoTonKho). Sản phẩm và
      * khuyến mãi lấy từ BỘ NHỚ ĐỆM (đọc TRƯỚC khi mở transaction) nên không tốn lượt nào.
      *
      * @param nguoiDungId tài khoản đang đăng nhập (null nếu khách đặt không đăng nhập)
@@ -447,6 +486,7 @@ public class DonHangService {
             if (truKho) doiKho(kho);
             return luu;
         });
+        if (truKho) dongBoTonKhoSanPham(kho.keySet());
         return new KetQuaTaoDon(daLuu, truKho);
     }
 
@@ -466,12 +506,14 @@ public class DonHangService {
      */
     public boolean doiTrangThai(Long id, String trangThaiMoi) {
         if (!DonHang.TRANG_THAI_HOP_LE.contains(trangThaiMoi)) throw trangThaiSai();
-        return Boolean.TRUE.equals(giaoDich.execute(gd -> {
+        boolean doiKho = Boolean.TRUE.equals(giaoDich.execute(gd -> {
             TinhTrangDon cu = khoaDon(id);
             int huong = huongKho(cu.giuKho(), !cu.daXoa() && !DonHang.DA_HUY.equals(trangThaiMoi));
             jdbc.update("update don_hang set trang_thai = ?, updated_at = now() where id = ?", trangThaiMoi, id);
             return huong != 0 && doiKhoCaDon(id, huong) > 0;
         }));
+        if (doiKho) dongBoTonKhoSanPhamCuaDon(id);
+        return doiKho;
     }
 
     /** Mọi bản ghi thanh toán của đơn thành "đã thanh toán". Không có đơn -> 404. */
@@ -491,11 +533,13 @@ public class DonHangService {
      * @return true nếu kho có thay đổi
      */
     public boolean xoaDon(Long id) {
-        return Boolean.TRUE.equals(giaoDich.execute(gd -> {
+        boolean doiKho = Boolean.TRUE.equals(giaoDich.execute(gd -> {
             TinhTrangDon cu = khoaDon(id);
             jdbc.update("update don_hang set is_deleted = true, updated_at = now() where id = ?", id);
             return cu.giuKho() && doiKhoCaDon(id, 1) > 0;
         }));
+        if (doiKho) dongBoTonKhoSanPhamCuaDon(id);
+        return doiKho;
     }
 
     /* ============================================================
@@ -541,7 +585,7 @@ public class DonHangService {
         }
         cau.append(") as v(id, sl) where b.id = v.id");
         jdbc.update(cau.toString(), thamSo.toArray());
-        dongBoTonKhoSanPham(delta.keySet());
+        // san_pham.ton_kho đồng bộ SAU commit (dongBoTonKhoSanPham), xem ghi chú ở hàm đó
     }
 
     /**
@@ -557,27 +601,83 @@ public class DonHangService {
                 + "from (select ct.bien_the_id as id, sum(ct.so_luong)::int as sl from don_hang_chi_tiet ct "
                 + "      where ct.don_hang_id = ? and ct.bien_the_id is not null group by ct.bien_the_id) d "
                 + "where b.id = d.id", huong, donHangId);
-        if (soDong == 0) return 0;
-        jdbc.update("update san_pham s set ton_kho = (select coalesce(sum(b.ton_kho), 0) from bien_the b "
-                + "where b.san_pham_id = s.id and b.is_deleted = false), updated_at = now() "
-                + "where s.id in (select b2.san_pham_id from bien_the b2 where b2.id in "
-                + "               (select ct.bien_the_id from don_hang_chi_tiet ct "
-                + "                where ct.don_hang_id = ? and ct.bien_the_id is not null))", donHangId);
         return soDong;
     }
 
-    /**
-     * san_pham.ton_kho = tổng tồn kho các biến thể chưa xoá của nó — MỘT câu, không
-     * đọc gì lên Java. Cột này chỉ là bản sao cho mấy chỗ đọc cũ; số thật nằm ở bien_the.
+    /*
+     * san_pham.ton_kho = tổng tồn kho các biến thể chưa xoá — cột này chỉ là bản sao cho
+     * mấy chỗ đọc cũ (thùng rác, đọc thẳng trên Supabase), số thật nằm ở bien_the.
+     *
+     * CỐ Ý chạy SAU khi transaction của đơn đã commit. Chạy bên trong thì đơn khoá bien_the
+     * rồi mới khoá san_pham, còn lượt lưu sản phẩm khoá san_pham trước rồi mới tới bien_the:
+     * hai việc trùng lúc trên cùng một sản phẩm là kẹt chéo (deadlock) và Postgres huỷ một bên.
+     *
+     * Chạy trong MỘT transaction nhỏ của riêng nó, HAI câu (xem dongBoTonKho):
+     *   1. khoá các dòng san_pham cần đồng bộ, theo id tăng dần (hai lượt đồng bộ song song
+     *      không kẹt chéo nhau). Lượt lưu sản phẩm đang giữ khoá dòng đó thì câu này CHỜ nó
+     *      commit xong; lượt lưu đến SAU thì phải chờ transaction này xong;
+     *   2. UPDATE cộng lại tổng. Ở mức READ COMMITTED mỗi CÂU chụp dữ liệu lúc câu đó BẮT
+     *      ĐẦU, nên câu 2 (bắt đầu sau khi đã có khoá) thấy đủ những gì lượt lưu sản phẩm
+     *      vừa ghi vào bien_the. Một câu UPDATE duy nhất thì SAI: nó chụp dữ liệu TRƯỚC khi
+     *      chờ khoá, chờ xong vẫn cộng trên bản chụp cũ rồi ghi đè con số đúng mà lượt lưu
+     *      sản phẩm vừa ghi.
+     * Khoá kiểu "for no key update" — đúng loại khoá chính câu UPDATE sẽ lấy: vẫn phải chờ
+     * lượt lưu sản phẩm (nó khoá "for update"), nhưng không chặn đơn khác đang ghi dòng món
+     * trỏ tới sản phẩm này (khoá ngoại chỉ cần "key share").
+     * Tốn 3 lượt đi-về (câu khoá kèm BEGIN, UPDATE, COMMIT) nên CHẠY NỀN trên một luồng
+     * riêng: khách đặt đơn / chủ shop huỷ đơn khỏi phải chờ thêm ~0,75 s cho một cột mà
+     * chính app không đọc (tồn kho hiện trên web và trang quản trị cộng từ bien_the, xem
+     * SanPhamDto). Một luồng duy nhất nên các lượt đồng bộ chạy lần lượt, không tranh khoá
+     * nhau; mỗi lượt cộng lại từ đầu nên lượt sau luôn ra số đúng.
+     *
+     * Lỗi ở đây CHỈ ghi log: đơn ĐÃ lưu, không được thành lỗi 500 (khách bấm đặt lại là
+     * thành hai đơn). Cột bản sao lệch tạm tới lần ghi kho kế tiếp của chính sản phẩm đó.
      */
     private void dongBoTonKhoSanPham(Collection<Long> idBienThe) {
         if (idBienThe.isEmpty()) return;
         String cho = String.join(", ", Collections.nCopies(idBienThe.size(), "?"));
-        jdbc.update("update san_pham s set ton_kho = (select coalesce(sum(b.ton_kho), 0) from bien_the b "
-                + "where b.san_pham_id = s.id and b.is_deleted = false), updated_at = now() "
-                + "where s.id in (select b2.san_pham_id from bien_the b2 where b2.id in (" + cho + "))",
-                idBienThe.toArray());
+        dongBoTonKho("select s.id from san_pham s where s.id in "
+                + "(select b.san_pham_id from bien_the b where b.id in (" + cho + ")) "
+                + "order by s.id for no key update", idBienThe.toArray());
     }
+
+    /** Như trên, cho mọi món có gắn biến thể của một đơn. */
+    private void dongBoTonKhoSanPhamCuaDon(Long donHangId) {
+        dongBoTonKho("select s.id from san_pham s where s.id in "
+                + "(select b.san_pham_id from bien_the b join don_hang_chi_tiet ct on ct.bien_the_id = b.id "
+                + " where ct.don_hang_id = ?) "
+                + "order by s.id for no key update", donHangId);
+    }
+
+    /**
+     * @param cauKhoa câu SELECT ... FOR NO KEY UPDATE trả id các sản phẩm cần đồng bộ,
+     *                đã xếp theo id tăng dần
+     */
+    private void dongBoTonKho(String cauKhoa, Object... thamSo) {
+        luongDongBo.execute(() -> {
+            try {
+                giaoDich.executeWithoutResult(gd -> {
+                    List<Long> idSanPham = jdbc.queryForList(cauKhoa, Long.class, thamSo);
+                    if (idSanPham.isEmpty()) return;
+                    String cho = String.join(", ", Collections.nCopies(idSanPham.size(), "?"));
+                    // Câu MỚI -> ảnh chụp MỚI, lấy SAU khi đã giữ khoá (xem ghi chú phía trên)
+                    jdbc.update("update san_pham s set ton_kho = (select coalesce(sum(b.ton_kho), 0) from bien_the b "
+                            + "where b.san_pham_id = s.id and b.is_deleted = false), updated_at = now() "
+                            + "where s.id in (" + cho + ")", idSanPham.toArray());
+                });
+            } catch (RuntimeException e) {
+                log.warn("[IN3D] Đồng bộ san_pham.ton_kho lỗi (đơn vẫn đã lưu): {}", e.getMessage());
+            }
+        });
+    }
+
+    /** Luồng nền duy nhất cho việc đồng bộ san_pham.ton_kho (xem ghi chú phía trên). */
+    private final java.util.concurrent.ExecutorService luongDongBo =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "dong-bo-ton-kho");
+                t.setDaemon(true);
+                return t;
+            });
 
     /* ============================================================
        Tiện ích

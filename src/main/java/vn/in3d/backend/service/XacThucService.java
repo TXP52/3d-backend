@@ -246,7 +246,11 @@ public class XacThucService {
     public NguoiDung themKhachHang(Map<String, Object> td) {
         NguoiDung nd = new NguoiDung();
         nd.setHoTen(hoTenHopLe(chuoi(td.get("hoTen"))));
-        nd.setSoDienThoai(trongThanhNull(chuoi(td.get("soDienThoai"))));
+        // Số điện thoại là thứ DUY NHẤT để nhận ra khách nhập tay (không có email, không
+        // đăng nhập) và để gắn đơn gõ tay / đơn cũ vào đúng người — hợp đồng mục 5 bắt buộc
+        String soDienThoai = trongThanhNull(chuoi(td.get("soDienThoai")));
+        if (soDienThoai == null) loi400("Vui lòng nhập số điện thoại.");
+        nd.setSoDienThoai(soDienThoai);
         nd.setEmail(emailHopLe(chuoi(td.get("email")), null));
         nd.setDiaChi(trongThanhNull(chuoi(td.get("diaChi"))));
         nd.setGhiChu(trongThanhNull(chuoi(td.get("ghiChu"))));
@@ -254,7 +258,11 @@ public class XacThucService {
         return nguoiDungRepo.save(nd);
     }
 
-    /** Sửa khách: khoá nào không gửi thì để yên. Tài khoản quản trị thì không đụng vào. */
+    /**
+     * Sửa khách: khoá nào không gửi thì để yên. Tài khoản quản trị thì không đụng vào.
+     * Khách TỰ ĐĂNG KÝ (có mật khẩu) thì email là tên đăng nhập của họ: gửi lại đúng email
+     * cũ thì được, xoá trống hay đổi sang email khác là 400 — không thì khách bị khoá ngoài.
+     */
     @Transactional
     public NguoiDung suaKhachHang(Long id, Map<String, Object> td) {
         NguoiDung nd = nguoiDungRepo.findById(id).orElseThrow(this::khongThayKhach);
@@ -262,7 +270,18 @@ public class XacThucService {
         kiemTraKhongPhaiAdmin(nd);
         if (td.containsKey("hoTen")) nd.setHoTen(hoTenHopLe(chuoi(td.get("hoTen"))));
         if (td.containsKey("soDienThoai")) nd.setSoDienThoai(trongThanhNull(chuoi(td.get("soDienThoai"))));
-        if (td.containsKey("email")) nd.setEmail(emailHopLe(chuoi(td.get("email")), id));
+        if (td.containsKey("email") && trongThanhNull(nd.getMatKhauHash()) != null) {
+            String gui = trongThanhNull(chuoi(td.get("email")));
+            String dangCo = trongThanhNull(nd.getEmail());
+            boolean giuNguyen = gui == null ? dangCo == null : gui.equalsIgnoreCase(dangCo);
+            if (!giuNguyen) {
+                loi400("Khách này đã tự đăng ký tài khoản, email là tên đăng nhập của khách "
+                        + "nên không xoá hay đổi được ở đây.");
+            }
+            // Gửi lại đúng email đang có: để nguyên, khỏi hỏi database xem có trùng không
+        } else if (td.containsKey("email")) {
+            nd.setEmail(emailHopLe(chuoi(td.get("email")), id));
+        }
         if (td.containsKey("diaChi")) nd.setDiaChi(trongThanhNull(chuoi(td.get("diaChi"))));
         if (td.containsKey("ghiChu")) nd.setGhiChu(trongThanhNull(chuoi(td.get("ghiChu"))));
         // nd đang được quản lý trong transaction: commit tự ghi phần thay đổi

@@ -175,7 +175,11 @@ public class BoNhoDem implements SmartInitializingSingleton {
     private final Muc<DuLieuNguoiDung> nguoiDung;
     private final Muc<DuLieuBoSuuTap> boSuuTap;
 
-    /** Luồng chạy các lượt nạp; mỗi khoá tối đa vài lượt cùng lúc nên 12 là dư. */
+    /**
+     * Luồng chạy các lượt nạp (và truy vấn phụ chạy song song của bộ SP); mỗi khoá tối đa
+     * vài lượt cùng lúc nên 13 là dư. Hết luồng thì truy vấn phụ tự chạy trên luồng của
+     * lượt nạp SP, không kẹt.
+     */
     private final ExecutorService luongNap;
 
     /** Lúc lượt làm mới toàn bộ gần nhất NẠP XONG (0 = chưa lần nào) và nó tốn bao lâu. */
@@ -189,7 +193,8 @@ public class BoNhoDem implements SmartInitializingSingleton {
             t.setDaemon(true);
             return t;
         });
-        sanPham    = dangKy(SP,  nap::napSanPham,    TTL_MAC_DINH_MS);
+        // Bộ SP chạy thêm một truy vấn song song trên chính hồ luồng này (xem NapDuLieu.napSanPham)
+        sanPham    = dangKy(SP,  () -> nap.napSanPham(luongNap), TTL_MAC_DINH_MS);
         vatTu      = dangKy(VT,  nap::napVatTu,      TTL_MAC_DINH_MS);
         mauSac     = dangKy(MS,  nap::napMauSac,     TTL_MAC_DINH_MS);
         nhaCungCap = dangKy(NCC, nap::napNhaCungCap, TTL_MAC_DINH_MS);

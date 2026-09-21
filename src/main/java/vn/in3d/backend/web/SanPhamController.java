@@ -436,7 +436,7 @@ public class SanPhamController {
             List<DongNhua> nhua = nhuaHienTai(nhuaCu.getOrDefault(b.getId(), List.of()));
             DongBienThe dong = tuBienTheDangLuu(b, nhua);
             if (b.getId().equals(idMacDinh)) {
-                int tonKho = td.containsKey("tonKho") ? soNguyen(td.get("tonKho")) : b.getTonKho();
+                int tonKho = tonKhoSauSua(td.containsKey("tonKho"), td.get("tonKho"), td.get("tonKhoGoc"), b.getTonKho());
                 int soLuong = td.containsKey("soLuong") ? soNguyen(td.get("soLuong")) : b.getSoLuong();
                 boolean nhieuMau = td.containsKey("nhieuMau")
                         ? Boolean.parseBoolean(String.valueOf(td.get("nhieuMau"))) : b.getNhieuMau();
@@ -459,6 +459,23 @@ public class SanPhamController {
                     null, List.of(), true, 0, doDanhSachNhua(td.get("vatTus")))));
         }
         return chonMacDinh(ds);
+    }
+
+    /**
+     * Tồn kho của một biến thể sau lượt sửa.
+     *
+     * Form gửi kèm "tonKhoGoc" (số tồn LÚC MỞ FORM) thì chỉ cộng PHẦN CHÊNH chủ shop vừa
+     * gõ vào số đang lưu: mở form thấy 5, trong lúc đó khách đặt 1 (còn 4), chủ shop sửa
+     * tên rồi lưu vẫn gửi 5 — tính tuyệt đối là hàng khách vừa mua "mọc" lại. Không có
+     * tonKhoGoc (form cũ, biến thể mới) thì lấy đúng số gửi lên như trước.
+     *
+     * @param dangLuu số tồn đang lưu trong database (null = biến thể mới)
+     */
+    private int tonKhoSauSua(boolean coGui, Object tonKho, Object tonKhoGoc, Integer dangLuu) {
+        if (!coGui) return dangLuu == null ? 0 : dangLuu;
+        int moi = soNguyen(tonKho);
+        if (dangLuu == null || tonKhoGoc == null || String.valueOf(tonKhoGoc).isBlank()) return moi;
+        return dangLuu + (moi - soNguyen(tonKhoGoc));
     }
 
     /** Biến thể đang lưu, dạng dòng form — dùng cho các biến thể form cũ không đụng tới. */
@@ -506,7 +523,7 @@ public class SanPhamController {
                 : (c == null ? List.of() : nhuaHienTai(nhuaCu.getOrDefault(id, List.of())));
 
         return chuanHoaNhua(new DongBienThe(id, ten, mauSacId, maSku, gia,
-                d.containsKey("tonKho") ? soNguyen(d.get("tonKho")) : (c == null ? 0 : c.getTonKho()),
+                tonKhoSauSua(d.containsKey("tonKho"), d.get("tonKho"), d.get("tonKhoGoc"), c == null ? null : c.getTonKho()),
                 d.containsKey("soLuong") ? Math.max(1, soNguyen(d.get("soLuong"))) : (c == null ? 1 : c.getSoLuong()),
                 d.containsKey("nhieuMau")
                         ? Boolean.parseBoolean(String.valueOf(d.get("nhieuMau"))) : (c != null && c.getNhieuMau()),
@@ -650,10 +667,14 @@ public class SanPhamController {
         }
         sua.sort(java.util.Comparator.comparing(DongBienThe::macDinh));
         if (!sua.isEmpty()) {
-            jdbc.batchUpdate("update bien_the set ten = ?, mau_sac_id = ?, ma_sku = ?, gia = ?, ton_kho = ?, "
+            // Tồn kho ghi dạng CỘNG PHẦN CHÊNH (ton_kho = ton_kho + ?) chứ không ghi đè:
+            // đơn hàng trừ kho cũng bằng phép cộng nên đơn chốt xen giữa lúc đọc biến thể và
+            // lúc ghi ở đây không bị lượt lưu này xoá mất (xem tonKhoSauSua)
+            jdbc.batchUpdate("update bien_the set ten = ?, mau_sac_id = ?, ma_sku = ?, gia = ?, ton_kho = ton_kho + ?, "
                     + "trang_thai = ?, danh_sach_anh = ?, so_luong = ?, nhieu_mau = ?, mac_dinh = ?, "
                     + "thu_tu = ?, updated_at = now() where id = ?", sua, sua.size(), (ps, d) -> {
                 ganThamSoBienThe(ps, d, 1);
+                ps.setInt(5, d.tonKho() - cuTheoId.get(d.id()).getTonKho());
                 ps.setLong(12, d.id());
             });
         }
@@ -803,8 +824,14 @@ public class SanPhamController {
 
     /**
      * Bộ sưu tập của sản phẩm: gửi "boSuuTap" là THAY cả bộ (mảng id), không gửi thì để yên.
-     * Hai lệnh gọn (xoá hết rồi chèn lại) chứ không dò từng dòng — một sản phẩm chỉ nằm
-     * trong vài bộ.
+     *
+     * Chỉ đụng tới dòng nối THẬT SỰ đổi. thu_tu của dòng nối là VỊ TRÍ của sản phẩm TRONG
+     * BỘ (chủ shop xếp tay ở trang Bộ sưu tập) — xoá hết rồi chèn lại theo thứ tự danh sách
+     * bộ của sản phẩm là xáo mất thứ tự đó ở mọi bộ sản phẩm này đang nằm. Nên:
+     *   - bộ không còn trong danh sách: xoá đúng dòng nối của bộ đó;
+     *   - bộ mới thêm: sản phẩm đứng CUỐI bộ (thu_tu lớn nhất của bộ + 1);
+     *   - bộ vẫn giữ: dòng nối để y nguyên.
+     * Vẫn hai lệnh như trước (một DELETE, một INSERT ... SELECT), không đọc gì lên Java.
      */
     private void ganBoSuuTap(Long sanPhamId, Map<String, Object> td) {
         if (!td.containsKey("boSuuTap")) return;
@@ -815,13 +842,22 @@ public class SanPhamController {
                 if (id != null && !ids.contains(id)) ids.add(id);
             }
         }
-        jdbc.update("delete from san_pham_bo_suu_tap where san_pham_id = ?", sanPhamId);
+        Long[] mang = ids.toArray(new Long[0]);
+        // "<> all(mảng rỗng)" đúng với mọi dòng: gửi danh sách rỗng là gỡ khỏi mọi bộ
+        jdbc.update("delete from san_pham_bo_suu_tap where san_pham_id = ? and bo_suu_tap_id <> all(?::bigint[])", ps -> {
+            ps.setLong(1, sanPhamId);
+            ps.setArray(2, ps.getConnection().createArrayOf("bigint", mang));
+        });
         if (ids.isEmpty()) return;
-        jdbc.batchUpdate("insert into san_pham_bo_suu_tap (bo_suu_tap_id, san_pham_id, thu_tu) values (?, ?, ?)",
-                ids, ids.size(), (ps, id) -> {
-            ps.setLong(1, id);
-            ps.setLong(2, sanPhamId);
-            ps.setInt(3, ids.indexOf(id));
+        jdbc.update("insert into san_pham_bo_suu_tap (bo_suu_tap_id, san_pham_id, thu_tu) "
+                + "select m.id, ?, coalesce((select max(l.thu_tu) from san_pham_bo_suu_tap l "
+                + "                          where l.bo_suu_tap_id = m.id), -1) + 1 "
+                + "from unnest(?::bigint[]) as m(id) "
+                + "where not exists (select 1 from san_pham_bo_suu_tap l "
+                + "                  where l.bo_suu_tap_id = m.id and l.san_pham_id = ?)", ps -> {
+            ps.setLong(1, sanPhamId);
+            ps.setArray(2, ps.getConnection().createArrayOf("bigint", mang));
+            ps.setLong(3, sanPhamId);
         });
     }
 

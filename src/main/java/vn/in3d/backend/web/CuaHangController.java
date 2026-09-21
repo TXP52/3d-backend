@@ -64,14 +64,14 @@ public class CuaHangController {
     @GetMapping("/trang-chu")
     public Map<String, Object> trangChu(@RequestParam(required = false) Integer gioiHan) {
         int gh = gioiHan == null ? SO_TRANG_CHU_MAC_DINH : gioiHan;
-        List<KhuyenMai> dangChay = kmSanPhamDangChay();
+        NguCanh nc = nguCanh();
 
         List<Map<String, Object>> sanPham = new ArrayList<>();
         List<Map<String, Object>> dichVu = new ArrayList<>();
         for (Map<String, Object> sp : boNho.dsSanPham(false)) {
             boolean laDichVu = "dich_vu".equals(sp.get("loaiSanPham"));
             List<Map<String, Object>> vao = laDichVu ? dichVu : sanPham;
-            if (gh <= 0 || vao.size() < gh) vao.add(gon(sp, dangChay));
+            if (gh <= 0 || vao.size() < gh) vao.add(gon(sp, nc));
         }
 
         Map<String, Object> ra = new LinkedHashMap<>();
@@ -103,13 +103,13 @@ public class CuaHangController {
                 for (BoSuuTap.DongSanPham dong : bo.getSanPham()) trongBo.add(dong.getSanPhamId());
             }
         }
-        List<KhuyenMai> dangChay = kmSanPhamDangChay();
+        NguCanh nc = nguCanh();
         List<Map<String, Object>> ra = new ArrayList<>();
         for (Map<String, Object> sp : boNho.dsSanPham(false)) {
             if (!cacLoai.isEmpty() && !cacLoai.contains(String.valueOf(sp.get("loaiSanPham")))) continue;
             if (trongBo != null && !trongBo.contains((Long) sp.get("id"))) continue;
             if (gioiHan != null && gioiHan > 0 && ra.size() >= gioiHan) break;
-            ra.add(gon(sp, dangChay));
+            ra.add(gon(sp, nc));
         }
         return ra;
     }
@@ -178,9 +178,9 @@ public class CuaHangController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy bộ sưu tập.");
         }
         BoNhoDem.DuLieuSanPham banSp = boNho.sanPham();
-        List<KhuyenMai> dangChay = kmSanPhamDangChay();
+        NguCanh nc = nguCanh();
         List<Map<String, Object>> ds = new ArrayList<>();
-        for (Map<String, Object> sp : sanPhamCuaBo(b, banSp)) ds.add(gon(sp, dangChay));
+        for (Map<String, Object> sp : sanPhamCuaBo(b, banSp)) ds.add(gon(sp, nc));
 
         Map<String, Object> ra = new LinkedHashMap<>();
         ra.put("ten", b.getTen());
@@ -210,7 +210,7 @@ public class CuaHangController {
      * @param banSp bản chụp sản phẩm nơi gọi đã lấy — chính bản chụp lấy ra sp
      */
     private Map<String, Object> chiTietKemLienQuan(Map<String, Object> sp, BoNhoDem.DuLieuSanPham banSp) {
-        List<KhuyenMai> dangChay = kmSanPhamDangChay();
+        NguCanh nc = nguCanh();
         Object danhMucId = sp.get("danhMucId");
         List<Map<String, Object>> cungDanhMuc = new ArrayList<>();
         List<Map<String, Object>> khac = new ArrayList<>();
@@ -220,10 +220,10 @@ public class CuaHangController {
             else khac.add(o);
         }
         List<Map<String, Object>> lienQuan = new ArrayList<>();
-        for (Map<String, Object> o : cungDanhMuc) if (lienQuan.size() < 4) lienQuan.add(gon(o, dangChay));
-        for (Map<String, Object> o : khac) if (lienQuan.size() < 4) lienQuan.add(gon(o, dangChay));
+        for (Map<String, Object> o : cungDanhMuc) if (lienQuan.size() < 4) lienQuan.add(gon(o, nc));
+        for (Map<String, Object> o : khac) if (lienQuan.size() < 4) lienQuan.add(gon(o, nc));
 
-        Map<String, Object> ra = gon(sp, dangChay);
+        Map<String, Object> ra = gon(sp, nc);
         ra.put("lienQuan", lienQuan);
         return ra;
     }
@@ -234,7 +234,8 @@ public class CuaHangController {
      * giá 0 không giảm) — áp cho cả giá sản phẩm lẫn giá từng biến thể, vì khuyến mãi tính theo
      * SẢN PHẨM chứ không theo phân loại.
      */
-    private Map<String, Object> gon(Map<String, Object> sp, List<KhuyenMai> dangChay) {
+    private Map<String, Object> gon(Map<String, Object> sp, NguCanh nc) {
+        List<KhuyenMai> dangChay = nc.dangChay();
         Long id = (Long) sp.get("id");
         Long giaObj = (Long) sp.get("gia");
         long gia = giaObj == null ? 0 : giaObj;
@@ -301,9 +302,10 @@ public class CuaHangController {
         }
         List<String> anh = new ArrayList<>(daCoAnh);
 
+        // Chỉ bộ đang KHOE: bộ đang ẩn thì trang bộ sưu tập trả 404, hiện chip là dẫn khách vào ngõ cụt
         List<Map<String, Object>> boSuuTap = new ArrayList<>();
         for (Object o : sp.get("boSuuTap") instanceof List<?> ds ? ds : List.of()) {
-            if (!(o instanceof Map<?, ?> bo)) continue;
+            if (!(o instanceof Map<?, ?> bo) || !nc.boDangHien().contains(bo.get("id"))) continue;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("ten", bo.get("ten"));
             m.put("duongDan", bo.get("duongDan"));
@@ -377,6 +379,32 @@ public class CuaHangController {
     /** Cùng luật và thứ tự với KhuyenMaiController.giaSanPham, trên bộ nhớ đệm. */
     private List<KhuyenMai> kmSanPhamDangChay() {
         return khuyenMaiService.khuyenMaiSanPhamDangChay(boNho.khuyenMai().danhSach());
+    }
+
+    /**
+     * Những thứ gon() cần cho MỌI sản phẩm của một response, lấy MỘT lần ở đầu request.
+     * @param dangChay   khuyến mãi sản phẩm đang chạy
+     * @param boDangHien id các bộ sưu tập chưa xoá và đang bật hiển thị
+     */
+    private record NguCanh(List<KhuyenMai> dangChay, Set<Long> boDangHien) {}
+
+    private NguCanh nguCanh() {
+        return new NguCanh(kmSanPhamDangChay(), boDangHien());
+    }
+
+    /**
+     * Id các bộ sưu tập đang khoe. DTO sản phẩm mang MỌI bộ nó nằm trong (trang quản trị
+     * cần cả bộ đang ẩn); web khách chỉ được thấy bộ đang hiện. Đọc bộ nhớ đệm bộ sưu tập
+     * lỗi thì coi như không bộ nào hiện — thiếu chip vẫn hơn trang sản phẩm báo lỗi.
+     */
+    private Set<Long> boDangHien() {
+        try {
+            Set<Long> ra = new HashSet<>();
+            for (BoSuuTap b : boNho.boSuuTap().danhSach()) if (b.getHienThi()) ra.add(b.getId());
+            return ra;
+        } catch (RuntimeException boQua) {
+            return new HashSet<>();     // không dùng Set.of(): contains(null) của nó ném lỗi
+        }
     }
 
     private static <T> List<T> dauDanhSach(List<T> ds, int gioiHan) {

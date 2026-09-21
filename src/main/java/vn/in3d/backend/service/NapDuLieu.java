@@ -38,10 +38,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
 
 /**
- * Nạp từng bộ dữ liệu cho BoNhoDem — mỗi bộ MỘT truy vấn.
+ * Nạp từng bộ dữ liệu cho BoNhoDem — mỗi bộ MỘT lượt đi-về (bộ SP chạy hai truy vấn
+ * song song, xem napSanPham).
  *
  * Chỉ dùng truy vấn KHAI BÁO trong repository (derived / @Query): chạy ngoài
  * transaction nên đúng một lượt đi-về. findAll / findById có sẵn của Spring Data
@@ -80,10 +85,25 @@ public class NapDuLieu {
     }
 
     /**
-     * Sản phẩm + biến thể + dòng nhựa + cuộn + màu + tên danh mục: một truy vấn nối bảng,
-     * cộng MỘT truy vấn nữa cho bộ sưu tập của từng sản phẩm (2 lượt đi-về cho cả bộ SP).
+     * Sản phẩm + biến thể + dòng nhựa + cuộn + màu + tên danh mục: một truy vấn nối bảng.
+     * Bộ sưu tập của từng sản phẩm là truy vấn thứ hai, chạy SONG SONG trên luồng khác
+     * (kết nối khác) nên cả bộ SP chỉ tốn thời gian của MỘT lượt đi-về chứ không phải hai —
+     * bộ SP nạp lại ngay sau mỗi lượt lưu sản phẩm / đơn có trừ kho, chủ shop chờ đúng chỗ này.
+     *
+     * @param luong luồng chạy truy vấn bộ sưu tập (luồng nạp của BoNhoDem). Luồng nạp bận hết
+     *              thì chính luồng này chạy nốt truy vấn đó sau truy vấn chính (FutureTask chỉ
+     *              chạy MỘT lần, ai nhận trước người đó chạy) — không bao giờ ngồi chờ một việc
+     *              còn nằm trong hàng đợi của chính cái hồ luồng mình đang chiếm.
      */
-    public BoNhoDem.DuLieuSanPham napSanPham() {
+    public BoNhoDem.DuLieuSanPham napSanPham(Executor luong) {
+        FutureTask<Map<Long, List<Map<String, Object>>>> boSuuTapSongSong =
+                new FutureTask<>(this::napBoSuuTapTheoSanPham);
+        try {
+            luong.execute(boSuuTapSongSong);
+        } catch (RejectedExecutionException dangTat) {
+            // hồ luồng đang tắt: chạy tại chỗ bên dưới
+        }
+
         Map<Long, SanPham> sanPham = new LinkedHashMap<>();
         Map<Long, List<BienThe>> bienTheTheoSanPham = new HashMap<>();
         Map<Long, List<SanPhamVatTu>> dongTheoBienThe = new HashMap<>();
@@ -92,23 +112,30 @@ public class NapDuLieu {
         Map<Long, MauSac> mauTheoId = new HashMap<>();
         Set<Long> daCoBienThe = new HashSet<>();      // nối nhựa nên mỗi biến thể lặp lại nhiều dòng
 
-        for (Object[] dong : sanPhamRepo.napKemNhua()) {
-            SanPham sp = (SanPham) dong[0];
-            sanPham.putIfAbsent(sp.getId(), sp);
-            tenDanhMuc.put(sp.getId(), (String) dong[6]);
-            if (dong[1] instanceof BienThe b) {
-                if (daCoBienThe.add(b.getId())) {
-                    bienTheTheoSanPham.computeIfAbsent(sp.getId(), k -> new ArrayList<>()).add(b);
+        try {
+            for (Object[] dong : sanPhamRepo.napKemNhua()) {
+                SanPham sp = (SanPham) dong[0];
+                sanPham.putIfAbsent(sp.getId(), sp);
+                tenDanhMuc.put(sp.getId(), (String) dong[6]);
+                if (dong[1] instanceof BienThe b) {
+                    if (daCoBienThe.add(b.getId())) {
+                        bienTheTheoSanPham.computeIfAbsent(sp.getId(), k -> new ArrayList<>()).add(b);
+                    }
+                    if (dong[2] instanceof SanPhamVatTu n) {
+                        dongTheoBienThe.computeIfAbsent(b.getId(), k -> new ArrayList<>()).add(n);
+                    }
                 }
-                if (dong[2] instanceof SanPhamVatTu n) {
-                    dongTheoBienThe.computeIfAbsent(b.getId(), k -> new ArrayList<>()).add(n);
-                }
+                if (dong[3] instanceof VatTu v) cuonTheoId.put(v.getId(), v);
+                if (dong[4] instanceof MauSac m) mauTheoId.put(m.getId(), m);     // màu của cuộn
+                if (dong[5] instanceof MauSac m) mauTheoId.put(m.getId(), m);     // màu của biến thể
             }
-            if (dong[3] instanceof VatTu v) cuonTheoId.put(v.getId(), v);
-            if (dong[4] instanceof MauSac m) mauTheoId.put(m.getId(), m);     // màu của cuộn
-            if (dong[5] instanceof MauSac m) mauTheoId.put(m.getId(), m);     // màu của biến thể
+        } catch (RuntimeException | Error loi) {
+            // Truy vấn chính hỏng thì lượt nạp này bỏ: truy vấn bộ sưu tập chưa chạy thì khỏi chạy
+            boSuuTapSongSong.cancel(false);
+            throw loi;
         }
-        Map<Long, List<Map<String, Object>>> boSuuTap = napBoSuuTapTheoSanPham();
+        boSuuTapSongSong.run();      // chưa luồng nào nhận thì chạy luôn ở đây; đang / đã chạy thì bỏ qua
+        Map<Long, List<Map<String, Object>>> boSuuTap = ketQua(boSuuTapSongSong);
 
         List<Map<String, Object>> danhSach = new ArrayList<>();
         Map<Long, Map<String, Object>> theoId = new HashMap<>();
@@ -158,6 +185,21 @@ public class NapDuLieu {
         }
         for (var e : ra.entrySet()) e.setValue(Collections.unmodifiableList(e.getValue()));
         return ra;
+    }
+
+    /** Kết quả của việc chạy song song; lỗi của nó ném lại y nguyên như gọi thẳng. */
+    private static <T> T ketQua(FutureTask<T> viec) {
+        try {
+            return viec.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Bị ngắt khi đang nạp bộ nhớ đệm", e);
+        } catch (ExecutionException e) {
+            Throwable goc = e.getCause();
+            if (goc instanceof RuntimeException re) throw re;
+            if (goc instanceof Error er) throw er;
+            throw new IllegalStateException(goc);
+        }
     }
 
     /** Vật tư kèm tên màu / nhà cung cấp / loại: một truy vấn nối bảng. */

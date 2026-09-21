@@ -31,6 +31,18 @@ public class LoiValidateHandler {
         return Map.of("loi", "Ảnh nặng quá 5MB. Hãy chọn ảnh nhỏ hơn hoặc nén lại rồi tải lên.");
     }
 
+    /**
+     * Sai KIỂU dữ liệu: id trên đường dẫn không phải số (/api/bo-suu-tap/abc), ô số trong
+     * body gửi chữ (bienTheId: "abc"), JSON hỏng hay thiếu body. Không bắt thì Spring trả
+     * body mặc định {timestamp, status, error, path} — frontend chỉ đọc được khoá "loi".
+     */
+    @ExceptionHandler({org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class,
+                       org.springframework.http.converter.HttpMessageNotReadableException.class})
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Map<String, String> xuLySaiKieu(Exception ex) {
+        return Map.of("loi", "Dữ liệu gửi lên không hợp lệ.");
+    }
+
     @ExceptionHandler(ResponseStatusException.class)
     public ResponseEntity<Map<String, String>> xuLyLoiCoChu(ResponseStatusException ex) {
         return ResponseEntity.status(ex.getStatusCode())

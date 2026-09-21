@@ -49,10 +49,15 @@ public class BoSuuTapController {
         return boNho.dsBoSuuTap(tatCa);
     }
 
+    /**
+     * Một bộ theo id. Bộ đã xoá mềm là 404 như bộ không có: DTO không mang cờ đã xoá nên
+     * trả 200 thì nơi gọi không phân biệt được với bộ còn sống (bộ nhớ đệm vẫn giữ bộ đã
+     * xoá trong theoId cho mấy chỗ tra khác).
+     */
     @GetMapping("/{id}")
     public Map<String, Object> mot(@PathVariable Long id) {
         BoSuuTap b = boNho.boSuuTap().theoId().get(id);
-        if (b == null) throw khongThay();
+        if (b == null || Boolean.TRUE.equals(b.getDaXoa())) throw khongThay();
         return BoSuuTapDto.tao(b, b.getSanPham(), boNho.sanPham().theoId());
     }
 
@@ -60,7 +65,10 @@ public class BoSuuTapController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, Object> them(@RequestBody Map<String, Object> td) {
-        List<Long> idSanPham = docSanPham(td);
+        // Bản chụp sản phẩm lấy MỘT lần, trước transaction: vừa để kiểm tra id vừa để dựng
+        // bản dự phòng nếu sau commit nạp lại lỗi (xem traBoSuuTap)
+        Map<Long, Map<String, Object>> spTruoc = docSanPhamTheoId();
+        List<Long> idSanPham = docSanPham(td, spTruoc);
         BoSuuTap daLuu = giaoDich.execute(gd -> {
             BoSuuTap b = new BoSuuTap();
             b.setTen(tenHopLe(chuoi(td.get("ten"))));
@@ -73,7 +81,7 @@ public class BoSuuTapController {
             chenSanPham(luu.getId(), idSanPham);    // bộ mới nên khỏi xoá bảng nối trước
             return luu;
         });
-        return traBoSuuTap(daLuu.getId(), daLuu, idSanPham);
+        return traBoSuuTap(daLuu.getId(), daLuu, dongSanPham(idSanPham), spTruoc);
     }
 
     /**
@@ -82,7 +90,12 @@ public class BoSuuTapController {
      */
     @PutMapping("/{id}")
     public Map<String, Object> sua(@PathVariable Long id, @RequestBody Map<String, Object> td) {
-        List<Long> idSanPham = docSanPham(td);
+        Map<Long, Map<String, Object>> spTruoc = docSanPhamTheoId();
+        List<Long> idSanPham = docSanPham(td, spTruoc);
+        // Không gửi "sanPham" thì bảng nối không đổi: bản dự phòng lấy danh sách đang có
+        // trong bộ nhớ đệm (đọc TRƯỚC transaction), khỏi báo nhầm bộ rỗng
+        List<BoSuuTap.DongSanPham> dongDuPhong = td.containsKey("sanPham")
+                ? dongSanPham(idSanPham) : dongSanPhamDangCo(id);
         BoSuuTap daSua = giaoDich.execute(gd -> {
             BoSuuTap b = repo.findById(id).orElseThrow(this::khongThay);
             if (td.containsKey("ten")) b.setTen(tenHopLe(chuoi(td.get("ten"))));
@@ -98,7 +111,7 @@ public class BoSuuTapController {
             // b đang được quản lý trong transaction: commit tự ghi, khỏi gọi save
             return b;
         });
-        return traBoSuuTap(id, daSua, td.containsKey("sanPham") ? idSanPham : null);
+        return traBoSuuTap(id, daSua, dongDuPhong, spTruoc);
     }
 
     /**
@@ -138,12 +151,14 @@ public class BoSuuTapController {
     /**
      * Danh sách id sản phẩm gửi lên, bỏ trùng và giữ thứ tự.
      *
-     * Đọc TRƯỚC khi mở transaction (đọc bộ nhớ đệm lúc đang mở transaction là để một
+     * Gọi TRƯỚC khi mở transaction (đọc bộ nhớ đệm lúc đang mở transaction là để một
      * lượt nạp chen vào giữa) và kiểm tra luôn sản phẩm có thật không — id bậy thì
      * vướng khoá ngoại và thành lỗi 500 khó hiểu. Bộ nhớ đệm hỏng thì bỏ qua bước
      * kiểm tra, để khoá ngoại của database lo.
+     *
+     * @param daCo bản chụp sản phẩm nơi gọi đã lấy (null = không đọc được)
      */
-    private List<Long> docSanPham(Map<String, Object> td) {
+    private List<Long> docSanPham(Map<String, Object> td, Map<Long, Map<String, Object>> daCo) {
         List<Long> ids = new ArrayList<>();
         if (td.get("sanPham") instanceof List<?> tho) {
             for (Object o : tho) {
@@ -151,7 +166,6 @@ public class BoSuuTapController {
                 if (id != null && !ids.contains(id)) ids.add(id);
             }
         }
-        Map<Long, Map<String, Object>> daCo = docSanPhamTheoId();
         if (daCo != null) {
             for (Long id : ids) {
                 if (!daCo.containsKey(id)) {
@@ -166,13 +180,17 @@ public class BoSuuTapController {
      * Đã commit: nạp lại bộ sưu tập + sản phẩm rồi trả đúng dòng danh sách từ bộ nhớ đệm.
      *
      * Nạp lại lỗi (Supabase chớp một nhịp) thì KHÔNG đọc lại bộ nhớ đệm nữa: đọc là mở
-     * thêm một lượt nạp, lỗi lần hai thì ném ra ngoài và lệnh ghi ĐÃ COMMIT lại thành
-     * lỗi 500 — bấm Lưu lại là có hai bộ trùng. Dựng tạm dòng từ chính entity vừa ghi;
-     * trang quản trị hỏi lại ngay sau đó nên vẫn thấy số mới.
+     * thêm một lượt nạp (khoá SP vừa bị xoá và nạp hỏng, đọc là chờ thêm một lượt tới
+     * hết connection-timeout), lỗi lần hai thì ném ra ngoài và lệnh ghi ĐÃ COMMIT lại
+     * thành lỗi 500 — bấm Lưu lại là có hai bộ trùng. Dựng tạm dòng từ chính entity vừa
+     * ghi và bản chụp sản phẩm lấy TRƯỚC transaction; trang quản trị hỏi lại ngay sau đó
+     * nên vẫn thấy số mới.
      *
-     * @param idSanPham danh sách sản phẩm vừa ghi, null = lượt ghi này không đụng tới
+     * @param dongSanPham bảng nối của bộ sau lượt ghi này (dựng sẵn trước transaction)
+     * @param spTruoc     bản chụp sản phẩm lấy trước transaction (null = không đọc được)
      */
-    private Map<String, Object> traBoSuuTap(Long id, BoSuuTap duPhong, List<Long> idSanPham) {
+    private Map<String, Object> traBoSuuTap(Long id, BoSuuTap duPhong, List<BoSuuTap.DongSanPham> dongSanPham,
+                                            Map<Long, Map<String, Object>> spTruoc) {
         if (boNho.xoaVaNapLai(BoNhoDem.BST, BoNhoDem.SP)) {
             try {
                 for (Map<String, Object> m : boNho.dsBoSuuTap(true)) {
@@ -182,7 +200,7 @@ public class BoSuuTapController {
                 // rơi xuống dùng bản dự phòng
             }
         }
-        return BoSuuTapDto.tao(duPhong, dongSanPham(idSanPham), docSanPhamTheoId());
+        return BoSuuTapDto.tao(duPhong, dongSanPham, spTruoc);
     }
 
     /** Bảng nối vừa ghi, dựng lại từ danh sách id (entity không đọc được nữa sau transaction). */
@@ -190,6 +208,19 @@ public class BoSuuTapController {
         List<BoSuuTap.DongSanPham> ds = new ArrayList<>();
         for (int i = 0; ids != null && i < ids.size(); i++) ds.add(new BoSuuTap.DongSanPham(ids.get(i), i));
         return ds;
+    }
+
+    /**
+     * Bảng nối ĐANG CÓ của một bộ, lấy ở bộ nhớ đệm (gọi trước transaction) — cho bản dự
+     * phòng của lượt sửa không đụng tới danh sách sản phẩm. Đọc không được thì để trống.
+     */
+    private List<BoSuuTap.DongSanPham> dongSanPhamDangCo(Long id) {
+        try {
+            BoSuuTap b = boNho.boSuuTap().theoId().get(id);
+            return b == null ? List.of() : b.getSanPham();
+        } catch (RuntimeException boQua) {
+            return List.of();
+        }
     }
 
     /** Bản chụp sản phẩm để lấy tên / ảnh; đọc không được thì thôi, đừng làm hỏng lệnh đã ghi. */
