@@ -16,12 +16,15 @@ import vn.in3d.backend.repository.SanPhamRepository;
 import vn.in3d.backend.repository.SanPhamVatTuRepository;
 import vn.in3d.backend.repository.VatTuRepository;
 import vn.in3d.backend.service.BoNhoDem;
+import vn.in3d.backend.service.ChiPhiMayService;
 
 import java.sql.Types;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 /** API sản phẩm cho website bán hàng và trang quản trị. */
 @RestController
@@ -44,7 +47,30 @@ public class SanPhamController {
     private static final String KHOA_BO_SUU_TAP = "BST";
 
     /** Các ô của form cũ (chưa biết biến thể) thuộc về BIẾN THỂ MẶC ĐỊNH. */
-    private static final List<String> O_CUA_BIEN_THE = List.of("tonKho", "soLuong", "nhieuMau", "vatTus");
+    private static final List<String> O_CUA_BIEN_THE = List.of("tonKho", "soLuong", "nhieuMau", "vatTus", "thoiGianInPhut");
+
+    /** Mã sản phẩm chủ shop gõ: chữ (kể cả chữ có dấu), số và - _ . — không khoảng trắng. */
+    private static final Pattern MA_HOP_LE = Pattern.compile("^[\\p{L}\\p{M}\\p{N}._-]+$");
+    private static final int MA_TOI_DA = 40;
+
+    /** Tên chỉ mục "mã không trùng giữa các sản phẩm chưa xoá" (sql/2026-09-21-ma-san-pham-gio-in.sql). */
+    private static final String CHI_MUC_MA = "san_pham_ma_uq";
+
+    /**
+     * Mã một sản phẩm ĐANG DÙNG trong SQL: mã đã lưu, dòng cũ chưa có mã thì "SP-<id>" — khớp
+     * SanPham.getMaHienThi, nên sinh mã / kiểm tra trùng không đụng với mã trang web đang hiện.
+     */
+    private static final String MA_DANG_DUNG = "coalesce(nullif(btrim(%1$s.ma_san_pham), ''), 'SP-' || %1$s.id)";
+
+    /**
+     * Mã TỰ SINH kế tiếp: SP-<số lớn nhất trong các mã dạng SP-<số> của sản phẩm chưa xoá + 1>
+     * (không phân biệt hoa thường; sp-007 tính là 7). Chỉ xét phần số tới 18 chữ số cho vừa
+     * bigint — ai lỡ gõ mã SP-<40 chữ số> thì mã sinh ra không vượt quá 40 ký tự của cột.
+     */
+    private static final String SQL_MA_TIEP_THEO =
+            "(select 'SP-' || (coalesce(max(substring(x.ma from 4)::bigint), 0) + 1) "
+            + "from (select " + MA_DANG_DUNG.formatted("m") + " as ma from san_pham m where not m.is_deleted) x "
+            + "where x.ma ~* '^SP-[0-9]{1,18}$')";
 
     private final SanPhamRepository sanPhamRepo;
     private final DanhMucRepository danhMucRepo;
@@ -52,6 +78,7 @@ public class SanPhamController {
     private final SanPhamVatTuRepository spVatTuRepo;
     private final BienTheRepository bienTheRepo;
     private final BoNhoDem boNho;
+    private final ChiPhiMayService chiPhiMay;
     private final TransactionTemplate giaoDich;
     private final JdbcTemplate jdbc;
 
@@ -61,6 +88,7 @@ public class SanPhamController {
                              SanPhamVatTuRepository spVatTuRepo,
                              BienTheRepository bienTheRepo,
                              BoNhoDem boNho,
+                             ChiPhiMayService chiPhiMay,
                              TransactionTemplate giaoDich,
                              JdbcTemplate jdbc) {
         this.sanPhamRepo = sanPhamRepo;
@@ -69,6 +97,7 @@ public class SanPhamController {
         this.spVatTuRepo = spVatTuRepo;
         this.bienTheRepo = bienTheRepo;
         this.boNho = boNho;
+        this.chiPhiMay = chiPhiMay;
         this.giaoDich = giaoDich;
         this.jdbc = jdbc;
     }
@@ -90,10 +119,11 @@ public class SanPhamController {
      * Mỗi sản phẩm kèm luôn BIẾN THỂ, danh sách cuộn nhựa đã dùng và MÀU suy ra từ chính
      * mấy cuộn đó — trang quản trị khỏi phải gọi thêm rồi tự ghép.
      * Lấy từ bộ nhớ đệm (BoNhoDem): dựng sẵn bằng MỘT truy vấn nối bảng, xem SanPhamDto.
+     * Tiền máy / giá vốn mỗi cái ghép lúc trả lời từ chi phí chạy máy (ChiPhiMayService).
      */
     @GetMapping("/san-pham")
     public List<Map<String, Object>> danhSach(@RequestParam(defaultValue = "false") boolean tatCa) {
-        return boNho.dsSanPham(tatCa);
+        return ChiPhiMayService.kemChiPhi(boNho.dsSanPham(tatCa), chiPhiMay.tinhAnToan());
     }
 
     /**
@@ -102,16 +132,27 @@ public class SanPhamController {
      */
     @PostMapping("/san-pham")
     public Map<String, Object> them(@RequestBody Map<String, Object> td) {
-        // Màu đọc TRƯỚC khi mở transaction: đọc bộ nhớ đệm giữa transaction là để lượt nạp
-        // (một truy vấn nữa) chen vào giữa, giữ khoá dòng sản phẩm lâu thêm cả lượt đi-về
+        // Màu và chi phí máy đọc TRƯỚC khi mở transaction: đọc bộ nhớ đệm giữa transaction là để
+        // lượt nạp (một truy vấn nữa) chen vào giữa, giữ khoá dòng sản phẩm lâu thêm cả lượt đi-về
         Map<Long, MauSac> mauTheoId = mauDangCo();
-        KetQuaLuu kq = giaoDich.execute(gd -> {
+        ChiPhiMayService.ChiPhiMay chiPhiTruoc = chiPhiMay.tinhAnToan();
+        String maGui = docMaSanPham(td);                // kiểm tra dạng trước, khỏi mở transaction vô ích
+        boolean sinhMa = maGui == null || maGui.isEmpty();
+        KetQuaLuu kq = luuCoThuLai(maGui, sinhMa, () -> giaoDich.execute(gd -> {
             SanPham sp = new SanPham();
             String ten = chuoi(td.get("ten"));
             if (ten == null || ten.isBlank()) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tên sản phẩm không được để trống.");
             }
             sp.setTen(ten.trim());
+            // Mã sản phẩm: sinh / kiểm tra trùng NGAY TRONG transaction ghi (chỉ mục duy nhất
+            // chặn nốt trường hợp hai lượt lưu song song cùng lọt qua bước này)
+            if (sinhMa) {
+                sp.setMaSanPham(sinhMaSanPham());
+            } else {
+                if (maDaDung(maGui, null)) throw maDaCo(maGui);
+                sp.setMaSanPham(maGui);
+            }
             sp.setMoTa(chuoi(td.get("moTa")));
             ganAnh(sp, td);
             sp.setGia((long) soNguyen(td.get("gia")));
@@ -143,8 +184,8 @@ public class SanPhamController {
             KetQuaBienThe bt = luuBienThe(daLuu, List.of(), Map.of(), yeuCau, mauTheoId);
             ganBoSuuTap(daLuu.getId(), td);
             return new KetQuaLuu(daLuu.getId(), daLuu, bt);
-        });
-        return traKetQuaLuu(kq, mauTheoId, td.containsKey("boSuuTap"));
+        }));
+        return traKetQuaLuu(kq, mauTheoId, chiPhiTruoc, td.containsKey("boSuuTap"));
     }
 
     /**
@@ -154,10 +195,14 @@ public class SanPhamController {
     @PutMapping("/san-pham/{id}")
     public Map<String, Object> capNhat(@PathVariable Long id, @RequestBody Map<String, Object> thayDoi) {
         Map<Long, MauSac> mauTheoId = mauDangCo();
-        KetQuaLuu kq = giaoDich.execute(gd -> {
+        ChiPhiMayService.ChiPhiMay chiPhiTruoc = chiPhiMay.tinhAnToan();
+        String maGui = docMaSanPham(thayDoi);           // null = không gửi ô mã -> để yên
+        boolean sinhMa = maGui != null && maGui.isEmpty();
+        KetQuaLuu kq = luuCoThuLai(maGui, sinhMa, () -> giaoDich.execute(gd -> {
             // Khoá dòng sản phẩm tới lúc commit: hai lần lưu song song không trừ kho hai lần
             SanPham sp = sanPhamRepo.khoaTheoId(id)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm."));
+            if (maGui != null) ganMaSanPham(sp, maGui);
             if (thayDoi.containsKey("ten")) {
                 String ten = String.valueOf(thayDoi.get("ten")).trim();
                 if (ten.isEmpty()) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Tên sản phẩm không được để trống.");
@@ -212,8 +257,91 @@ public class SanPhamController {
             ganBoSuuTap(sp.getId(), thayDoi);
             // sp đang được quản lý trong transaction: commit tự ghi phần thay đổi, khỏi gọi save
             return new KetQuaLuu(sp.getId(), sp, bt);
-        });
-        return traKetQuaLuu(kq, mauTheoId, thayDoi.containsKey("boSuuTap"));
+        }));
+        return traKetQuaLuu(kq, mauTheoId, chiPhiTruoc, thayDoi.containsKey("boSuuTap"));
+    }
+
+    /* ---------------- Mã sản phẩm ---------------- */
+
+    /**
+     * Ô "maSanPham" của form: null = không gửi, "" = để trống (backend sinh mã), còn lại là
+     * mã đã cắt khoảng trắng hai đầu và đúng dạng. Kiểm tra dạng TRƯỚC khi mở transaction.
+     */
+    private String docMaSanPham(Map<String, Object> td) {
+        if (!td.containsKey("maSanPham")) return null;
+        String ma = rong(chuoi(td.get("maSanPham")));
+        if (ma == null) return "";
+        if (ma.codePointCount(0, ma.length()) > MA_TOI_DA || !MA_HOP_LE.matcher(ma).matches()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Mã sản phẩm chỉ gồm chữ, số và các dấu - _ . (không có khoảng trắng), tối đa "
+                    + MA_TOI_DA + " ký tự.");
+        }
+        return ma;
+    }
+
+    /**
+     * PUT có gửi ô mã (chạy trong transaction, sp đã khoá):
+     *   - để trống: sinh mã mới như lúc thêm;
+     *   - gửi lại đúng mã đang hiện (kể cả "SP-<id>" của dòng cũ chưa lưu mã): khỏi kiểm tra,
+     *     chỉ ghi hẳn xuống cột — form sửa sản phẩm luôn gửi lại ô này nên đây là đường hay gặp;
+     *   - mã khác: không được trùng sản phẩm chưa xoá nào khác.
+     */
+    private void ganMaSanPham(SanPham sp, String maGui) {
+        if (maGui.isEmpty()) {
+            sp.setMaSanPham(sinhMaSanPham());
+            return;
+        }
+        if (!maGui.equals(sp.getMaHienThi()) && maDaDung(maGui, sp.getId())) throw maDaCo(maGui);
+        sp.setMaSanPham(maGui);
+    }
+
+    /** Mã tự sinh kế tiếp — MỘT truy vấn, chạy trong transaction lưu. */
+    private String sinhMaSanPham() {
+        return jdbc.queryForObject("select " + SQL_MA_TIEP_THEO, String.class);
+    }
+
+    /** Có sản phẩm CHƯA xoá nào khác (khác boQuaId) đang dùng mã này không — không phân biệt hoa thường. */
+    private boolean maDaDung(String ma, Long boQuaId) {
+        Boolean co = jdbc.queryForObject("select exists (select 1 from san_pham s where not s.is_deleted "
+                + "and s.id <> ? and upper(" + MA_DANG_DUNG.formatted("s") + ") = upper(?))", Boolean.class,
+                boQuaId == null ? -1L : boQuaId, ma);
+        return Boolean.TRUE.equals(co);
+    }
+
+    private static ResponseStatusException maDaCo(String ma) {
+        return new ResponseStatusException(HttpStatus.BAD_REQUEST, "Mã sản phẩm \"" + ma + "\" đã có ở sản phẩm khác.");
+    }
+
+    /**
+     * Chạy một lượt lưu (cả transaction). Đụng chỉ mục mã sản phẩm — hai lượt lưu song song
+     * cùng qua được bước kiểm tra / cùng sinh ra một số — thì transaction đã rollback sạch:
+     *   - mã TỰ SINH: chạy lại cả lượt MỘT lần (lượt sau đọc được mã lượt kia vừa commit);
+     *   - mã chủ shop gõ: báo trùng như bước kiểm tra.
+     */
+    private KetQuaLuu luuCoThuLai(String maGui, boolean sinhMa, Supplier<KetQuaLuu> luot) {
+        for (int lan = 1; ; lan++) {
+            try {
+                return luot.get();
+            } catch (RuntimeException loi) {
+                if (!dungChiMucMa(loi)) throw loi;
+                if (sinhMa && lan < 2) continue;
+                if (sinhMa) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "Mã sản phẩm tự sinh vừa trùng với sản phẩm khác. Hãy bấm Lưu lại.");
+                }
+                throw maDaCo(maGui);
+            }
+        }
+    }
+
+    /** Lỗi này có phải do chỉ mục "mã sản phẩm không trùng" không (dò cả chuỗi nguyên nhân). */
+    private static boolean dungChiMucMa(Throwable loi) {
+        for (Throwable t = loi; t != null; t = t.getCause() == t ? null : t.getCause()) {
+            if (t instanceof ResponseStatusException) return false;
+            String chu = t.getMessage();
+            if (chu != null && chu.contains(CHI_MUC_MA)) return true;
+        }
+        return false;
     }
 
     /**
@@ -242,10 +370,15 @@ public class SanPhamController {
      * chủ shop bấm Lưu lại là thêm một sản phẩm nữa VÀ trừ gram cuộn nhựa lần hai.
      * Nạp không được thì dựng dòng từ chính entity transaction vừa ghi; trang quản trị hỏi
      * lại các khoá của nó ngay sau đó nên vẫn thấy số mới.
+     *
+     * Tiền máy ghép bằng chi phí máy đọc TRƯỚC transaction (lượt lưu sản phẩm không đổi máy
+     * in hay định mức nào); lúc đó đọc lỗi thì chỉ tính lại khi bộ nhớ đệm vừa nạp lại được.
      */
-    private Map<String, Object> traKetQuaLuu(KetQuaLuu kq, Map<Long, MauSac> mauTheoId, boolean doiBoSuuTap) {
+    private Map<String, Object> traKetQuaLuu(KetQuaLuu kq, Map<Long, MauSac> mauTheoId,
+                                             ChiPhiMayService.ChiPhiMay chiPhiTruoc, boolean doiBoSuuTap) {
         Map<String, Object> dongSanPham = null;
         List<Map<String, Object>> vatTuThayDoi = new java.util.ArrayList<>();
+        ChiPhiMayService.ChiPhiMay chiPhi = chiPhiTruoc;
         if (boNho.xoaVaNapLai(khoaCanXoa(doiBoSuuTap))) {
             try {
                 dongSanPham = boNho.sanPham().theoId().get(kq.id());
@@ -258,9 +391,11 @@ public class SanPhamController {
                 dongSanPham = null;
                 vatTuThayDoi.clear();
             }
+            if (chiPhi == null) chiPhi = chiPhiMay.tinhAnToan();
         }
         Map<String, Object> ra = new java.util.LinkedHashMap<>();
-        ra.put("sanPham", dongSanPham != null ? dongSanPham : dongSanPhamDuPhong(kq, mauTheoId));
+        ra.put("sanPham", ChiPhiMayService.kemChiPhi(
+                dongSanPham != null ? dongSanPham : dongSanPhamDuPhong(kq, mauTheoId), chiPhi));
         ra.put("vatTuThayDoi", vatTuThayDoi);
         return ra;
     }
@@ -338,10 +473,21 @@ public class SanPhamController {
         boNho.xoaVaNapLai(BoNhoDem.SP, BoNhoDem.VT);
     }
 
-    /** Khôi phục sản phẩm đã xoá. Trả dòng danh sách của sản phẩm đó. */
+    /**
+     * Khôi phục sản phẩm đã xoá. Trả dòng danh sách của sản phẩm đó.
+     *
+     * Xoá mềm là nhả mã cho sản phẩm khác dùng, nên lúc khôi phục mã cũ có thể đã có chủ:
+     * khi đó sản phẩm nhận mã tự sinh mới — vẫn MỘT câu UPDATE, không thêm lượt đi-về nào,
+     * và không bao giờ đụng chỉ mục mã rồi báo lỗi khôi phục.
+     */
     @PutMapping("/san-pham/{id}/khoi-phuc")
     public Map<String, Object> khoiPhuc(@PathVariable Long id) {
-        if (jdbc.update("update san_pham set is_deleted = false, updated_at = now() where id = ?", id) == 0) {
+        ChiPhiMayService.ChiPhiMay chiPhiTruoc = chiPhiMay.tinhAnToan();
+        if (jdbc.update("update san_pham s set is_deleted = false, updated_at = now(), "
+                + "ma_san_pham = case when exists (select 1 from san_pham o where not o.is_deleted and o.id <> s.id "
+                + "and upper(" + MA_DANG_DUNG.formatted("o") + ") = upper(" + MA_DANG_DUNG.formatted("s") + ")) "
+                + "then " + SQL_MA_TIEP_THEO + " else s.ma_san_pham end "
+                + "where s.id = ?", id) == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy sản phẩm.");
         }
         // Đã commit: nạp lại lỗi thì KHÔNG đọc bộ nhớ đệm nữa (đọc là mở thêm một lượt nạp,
@@ -355,7 +501,7 @@ public class SanPhamController {
                 dong = null;
             }
         }
-        return dong != null ? dong : Map.of("id", id);
+        return dong != null ? ChiPhiMayService.kemChiPhi(dong, chiPhiTruoc) : Map.of("id", id);
     }
 
     /** Danh sách sản phẩm đã xoá — để xem lại hoặc khôi phục. */
@@ -373,14 +519,14 @@ public class SanPhamController {
     private record DongBienThe(Long id, String ten, Long mauSacId, String maSku, Long gia,
                                int tonKho, int soLuong, boolean nhieuMau, String trangThai,
                                List<String> danhSachAnh, boolean macDinh, int thuTu,
-                               List<DongNhua> vatTus) {
+                               int thoiGianInPhut, List<DongNhua> vatTus) {
         DongBienThe voiNhua(int soLuongMoi, List<DongNhua> nhua) {
             return new DongBienThe(id, ten, mauSacId, maSku, gia, tonKho, Math.max(1, soLuongMoi), nhieuMau,
-                    trangThai, danhSachAnh, macDinh, thuTu, nhua);
+                    trangThai, danhSachAnh, macDinh, thuTu, thoiGianInPhut, nhua);
         }
         DongBienThe voiMacDinh(boolean md) {
             return new DongBienThe(id, ten, mauSacId, maSku, gia, tonKho, soLuong, nhieuMau,
-                    trangThai, danhSachAnh, md, thuTu, vatTus);
+                    trangThai, danhSachAnh, md, thuTu, thoiGianInPhut, vatTus);
         }
         String moTa() { return ten == null || ten.isBlank() ? "mặc định" : "\"" + ten + "\""; }
     }
@@ -407,8 +553,8 @@ public class SanPhamController {
     /**
      * Danh sách biến thể SAU lượt sửa, dựng từ form:
      *   - form mới gửi "bienThe": dùng nguyên danh sách đó;
-     *   - form cũ không biết biến thể: tonKho / soLuong / nhieuMau / vatTus áp vào BIẾN THỂ
-     *     MẶC ĐỊNH, các biến thể khác giữ y nguyên (nên trang chỉ sửa tên, giá vẫn chạy).
+     *   - form cũ không biết biến thể: tonKho / soLuong / nhieuMau / vatTus / thoiGianInPhut áp
+     *     vào BIẾN THỂ MẶC ĐỊNH, các biến thể khác giữ y nguyên (nên trang chỉ sửa tên, giá vẫn chạy).
      */
     private List<DongBienThe> docBienThe(Map<String, Object> td, List<BienThe> btCu,
                                          Map<Long, List<SanPhamVatTu>> nhuaCu) {
@@ -443,9 +589,10 @@ public class SanPhamController {
                 // Gửi lại danh sách nhựa, hoặc chỉ đổi số lượng / kiểu màu: chuẩn hoá lại
                 // theo kiểu màu rồi trừ/hoàn kho phần chênh, y như bản chưa có biến thể
                 List<DongNhua> nhuaMoi = td.containsKey("vatTus") ? doDanhSachNhua(td.get("vatTus")) : nhua;
+                int phut = td.containsKey("thoiGianInPhut") ? phutIn(td.get("thoiGianInPhut")) : b.getThoiGianInPhut();
                 dong = chuanHoaNhua(new DongBienThe(b.getId(), b.getTen(), b.getMauSacId(), b.getMaSku(),
                         b.getGia(), tonKho, Math.max(1, soLuong), nhieuMau, b.getTrangThai(),
-                        b.getDanhSachAnhList(), true, b.getThuTu(), nhuaMoi));
+                        b.getDanhSachAnhList(), true, b.getThuTu(), phut, nhuaMoi));
             }
             ds.add(dong);
         }
@@ -456,9 +603,28 @@ public class SanPhamController {
                     soNguyen(td.get("tonKho")),
                     td.containsKey("soLuong") ? Math.max(1, soNguyen(td.get("soLuong"))) : 1,
                     td.containsKey("nhieuMau") && Boolean.parseBoolean(String.valueOf(td.get("nhieuMau"))),
-                    null, List.of(), true, 0, doDanhSachNhua(td.get("vatTus")))));
+                    null, List.of(), true, 0, phutIn(td.get("thoiGianInPhut")), doDanhSachNhua(td.get("vatTus")))));
         }
         return chonMacDinh(ds);
+    }
+
+    /**
+     * Thời gian in MỘT cái (phút) gửi lên: trống = 0, số lẻ làm tròn (form nhập giờ + phút
+     * rồi quy ra phút), âm hoặc không phải số thì báo lỗi.
+     */
+    private int phutIn(Object v) {
+        String s = v == null ? "" : String.valueOf(v).trim();
+        if (s.isEmpty() || "null".equals(s)) return 0;
+        double x;
+        try {
+            x = v instanceof Number n ? n.doubleValue() : Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thời gian in phải là số phút.");
+        }
+        if (Double.isNaN(x) || x < 0 || x > Integer.MAX_VALUE) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Thời gian in phải là số phút không âm.");
+        }
+        return (int) Math.round(x);
     }
 
     /**
@@ -482,7 +648,7 @@ public class SanPhamController {
     private DongBienThe tuBienTheDangLuu(BienThe b, List<DongNhua> nhua) {
         return new DongBienThe(b.getId(), b.getTen(), b.getMauSacId(), b.getMaSku(), b.getGia(),
                 b.getTonKho(), b.getSoLuong(), b.getNhieuMau(), b.getTrangThai(),
-                b.getDanhSachAnhList(), b.getMacDinh(), b.getThuTu(), nhua);
+                b.getDanhSachAnhList(), b.getMacDinh(), b.getThuTu(), b.getThoiGianInPhut(), nhua);
     }
 
     /**
@@ -530,6 +696,8 @@ public class SanPhamController {
                 trangThai, anh,
                 Boolean.parseBoolean(String.valueOf(d.get("macDinh"))),
                 d.containsKey("thuTu") ? soNguyen(d.get("thuTu")) : (c == null ? 0 : c.getThuTu()),
+                d.containsKey("thoiGianInPhut")
+                        ? phutIn(d.get("thoiGianInPhut")) : (c == null ? 0 : c.getThoiGianInPhut()),
                 nhua));
     }
 
@@ -672,10 +840,10 @@ public class SanPhamController {
             // lúc ghi ở đây không bị lượt lưu này xoá mất (xem tonKhoSauSua)
             jdbc.batchUpdate("update bien_the set ten = ?, mau_sac_id = ?, ma_sku = ?, gia = ?, ton_kho = ton_kho + ?, "
                     + "trang_thai = ?, danh_sach_anh = ?, so_luong = ?, nhieu_mau = ?, mac_dinh = ?, "
-                    + "thu_tu = ?, updated_at = now() where id = ?", sua, sua.size(), (ps, d) -> {
+                    + "thu_tu = ?, thoi_gian_in_phut = ?, updated_at = now() where id = ?", sua, sua.size(), (ps, d) -> {
                 ganThamSoBienThe(ps, d, 1);
                 ps.setInt(5, d.tonKho() - cuTheoId.get(d.id()).getTonKho());
-                ps.setLong(12, d.id());
+                ps.setLong(13, d.id());
             });
         }
 
@@ -684,9 +852,10 @@ public class SanPhamController {
         Map<DongBienThe, Long> idMoi = new java.util.IdentityHashMap<>();
         if (!them.isEmpty()) {
             StringBuilder sql = new StringBuilder("insert into bien_the (san_pham_id, ten, mau_sac_id, ma_sku, "
-                    + "gia, ton_kho, trang_thai, danh_sach_anh, so_luong, nhieu_mau, mac_dinh, thu_tu) values ");
+                    + "gia, ton_kho, trang_thai, danh_sach_anh, so_luong, nhieu_mau, mac_dinh, thu_tu, "
+                    + "thoi_gian_in_phut) values ");
             for (int i = 0; i < them.size(); i++) {
-                sql.append(i == 0 ? "" : ", ").append("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                sql.append(i == 0 ? "" : ", ").append("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             }
             // Postgres ghi các dòng theo đúng thứ tự trong VALUES nên id trả về cũng theo thứ tự đó
             sql.append(" returning id");
@@ -753,12 +922,13 @@ public class SanPhamController {
             b.setNhieuMau(d.nhieuMau());
             b.setMacDinh(d.macDinh());
             b.setThuTu(d.thuTu());
+            b.setThoiGianInPhut(d.thoiGianInPhut());
             dsSau.add(b);
         }
         return new KetQuaBienThe(dsSau, nhuaSau, cuonDoi, cuon);
     }
 
-    /** Gán 11 tham số dữ liệu của một biến thể, trả vị trí tham số kế tiếp. */
+    /** Gán 12 tham số dữ liệu của một biến thể, trả vị trí tham số kế tiếp. */
     private int ganThamSoBienThe(java.sql.PreparedStatement ps, DongBienThe d, int i) throws java.sql.SQLException {
         ps.setString(i++, d.ten());
         ps.setObject(i++, d.mauSacId(), Types.BIGINT);
@@ -771,6 +941,7 @@ public class SanPhamController {
         ps.setBoolean(i++, d.nhieuMau());
         ps.setBoolean(i++, d.macDinh());
         ps.setInt(i++, d.thuTu());
+        ps.setInt(i++, d.thoiGianInPhut());
         return i;
     }
 
@@ -787,7 +958,8 @@ public class SanPhamController {
                 && c.getSoLuong() == m.soLuong()
                 && c.getNhieuMau() == m.nhieuMau()
                 && c.getMacDinh() == m.macDinh()
-                && c.getThuTu() == m.thuTu();
+                && c.getThuTu() == m.thuTu()
+                && c.getThoiGianInPhut() == m.thoiGianInPhut();
     }
 
     /**

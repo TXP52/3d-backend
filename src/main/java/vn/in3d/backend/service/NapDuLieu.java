@@ -314,6 +314,22 @@ public class NapDuLieu {
                 Collections.unmodifiableMap(theoId), Collections.unmodifiableMap(theoDuongDan));
     }
 
+    /**
+     * Bảng cai_dat (khoá / giá trị) — MỘT truy vấn, SQL gốc như bộ sưu tập theo sản phẩm:
+     * bảng vài dòng, chỉ đọc, không cần entity. Bảng rỗng = mọi định mức dùng mặc định.
+     */
+    public BoNhoDem.DuLieuCaiDat napCaiDat() {
+        Map<String, String> theoKhoa = new LinkedHashMap<>();
+        try (EntityManager em = emf.createEntityManager()) {
+            List<?> dong = em.createNativeQuery("select khoa, gia_tri from cai_dat order by khoa").getResultList();
+            for (Object o : dong) {
+                Object[] d = (Object[]) o;
+                theoKhoa.put(String.valueOf(d[0]), d[1] == null ? null : String.valueOf(d[1]));
+            }
+        }
+        return new BoNhoDem.DuLieuCaiDat(Collections.unmodifiableMap(theoKhoa));
+    }
+
     public BoNhoDem.DuLieuNguoiDung napNguoiDung() {
         List<NguoiDung> danhSach = new ArrayList<>();
         Map<String, NguoiDung> theoEmail = new HashMap<>();

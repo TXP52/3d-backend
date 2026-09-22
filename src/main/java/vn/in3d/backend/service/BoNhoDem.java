@@ -40,8 +40,8 @@ import java.util.function.Supplier;
  * nên giữ sẵn ảnh chụp từng bảng trong RAM là trả trong vài mili-giây.
  *
  * Cách chạy:
- *   - 10 bộ dữ liệu (khoá SP, VT, MS, NCC, DM, KM, BV, DH, ND, BST), mỗi bộ nạp bằng
- *     MỘT truy vấn (xem NapDuLieu). Khởi động xong là nạp sẵn cả 10 song song.
+ *   - 11 bộ dữ liệu (khoá SP, VT, MS, NCC, DM, KM, BV, DH, ND, BST, CD), mỗi bộ nạp bằng
+ *     MỘT truy vấn (xem NapDuLieu). Khởi động xong là nạp sẵn cả 11 song song.
  *   - Hết hạn (đơn hàng 60 giây, còn lại 10 phút — phòng khi sửa tay trên
  *     Supabase Dashboard): vẫn trả bản cũ ngay, nạp lại ở nền.
  *   - Sau mỗi lệnh ghi ĐÃ COMMIT, nơi ghi gọi xoaVaNapLai(khoá...): bỏ bản cũ
@@ -82,8 +82,10 @@ public class BoNhoDem implements SmartInitializingSingleton {
     public static final String ND = "ND";
     /** Bộ sưu tập (kèm sản phẩm của từng bộ). */
     public static final String BST = "BST";
+    /** Cài đặt (bảng cai_dat: định mức chi phí chạy máy in...). */
+    public static final String CD = "CD";
 
-    public static final List<String> TAT_CA = List.of(SP, VT, MS, NCC, DM, KM, BV, DH, ND, BST);
+    public static final List<String> TAT_CA = List.of(SP, VT, MS, NCC, DM, KM, BV, DH, ND, BST, CD);
 
     private static final long TTL_MAC_DINH_MS = 10 * 60_000L;
     /** Đơn hàng sống ngắn: web khách còn đường ghi thẳng vào Supabase khi Java lỗi. */
@@ -161,6 +163,12 @@ public class BoNhoDem implements SmartInitializingSingleton {
     public record DuLieuBoSuuTap(List<BoSuuTap> danhSach, Map<Long, BoSuuTap> theoId,
                                  Map<String, BoSuuTap> theoDuongDan) {}
 
+    /**
+     * @param theoKhoa mọi dòng của bảng cai_dat, khoá -> giá trị (chuỗi như trong database).
+     *                 Khoá không có = dùng mặc định trong code (xem ChiPhiMayService).
+     */
+    public record DuLieuCaiDat(Map<String, String> theoKhoa) {}
+
     /* ---------------- Máy chạy ---------------- */
 
     private final Map<String, Muc<?>> cacMuc = new LinkedHashMap<>();
@@ -174,10 +182,11 @@ public class BoNhoDem implements SmartInitializingSingleton {
     private final Muc<DuLieuDonHang> donHang;
     private final Muc<DuLieuNguoiDung> nguoiDung;
     private final Muc<DuLieuBoSuuTap> boSuuTap;
+    private final Muc<DuLieuCaiDat> caiDat;
 
     /**
      * Luồng chạy các lượt nạp (và truy vấn phụ chạy song song của bộ SP); mỗi khoá tối đa
-     * vài lượt cùng lúc nên 13 là dư. Hết luồng thì truy vấn phụ tự chạy trên luồng của
+     * vài lượt cùng lúc nên 14 là dư. Hết luồng thì truy vấn phụ tự chạy trên luồng của
      * lượt nạp SP, không kẹt.
      */
     private final ExecutorService luongNap;
@@ -204,6 +213,7 @@ public class BoNhoDem implements SmartInitializingSingleton {
         donHang    = dangKy(DH,  nap::napDonHang,    TTL_DON_HANG_MS);
         nguoiDung  = dangKy(ND,  nap::napNguoiDung,  TTL_MAC_DINH_MS);
         boSuuTap   = dangKy(BST, nap::napBoSuuTap,   TTL_MAC_DINH_MS);
+        caiDat     = dangKy(CD,  nap::napCaiDat,     TTL_MAC_DINH_MS);
     }
 
     private <T> Muc<T> dangKy(String khoa, Supplier<T> hamNap, long ttlMs) {
@@ -224,6 +234,7 @@ public class BoNhoDem implements SmartInitializingSingleton {
     public DuLieuDonHang donHang() { return donHang.lay(); }
     public DuLieuNguoiDung nguoiDung() { return nguoiDung.lay(); }
     public DuLieuBoSuuTap boSuuTap() { return boSuuTap.lay(); }
+    public DuLieuCaiDat caiDat() { return caiDat.lay(); }
 
     /* ---------------- Đúng giá trị của các GET hiện có ---------------- */
 
@@ -365,7 +376,7 @@ public class BoNhoDem implements SmartInitializingSingleton {
 
     /**
      * Xoá và nạp lại MỌI bộ dữ liệu — cho nút "Làm mới" sau khi sửa tay trên Supabase Dashboard.
-     * Hai lượt gọi cách nhau dưới CACH_LAM_MOI_MS thì GỘP thành một: mỗi lượt là 10 truy vấn
+     * Hai lượt gọi cách nhau dưới CACH_LAM_MOI_MS thì GỘP thành một: mỗi lượt là 11 truy vấn
      * toàn bảng, bấm liên tục vừa làm nguội bộ nhớ đệm vừa hút hết kết nối của pooler.
      *
      * @return số mili-giây của lượt nạp; lượt bị gộp trả lại thời gian của lượt vừa xong
@@ -380,7 +391,7 @@ public class BoNhoDem implements SmartInitializingSingleton {
     }
 
     /**
-     * Nạp sẵn cả 10 bộ NGAY LÚC DỰNG BEAN (afterSingletonsInstantiated chạy trong refresh,
+     * Nạp sẵn cả 11 bộ NGAY LÚC DỰNG BEAN (afterSingletonsInstantiated chạy trong refresh,
      * trước khi Tomcat mở cổng) — trước đây nghe ApplicationReadyEvent nên cổng mở sớm
      * hơn bộ nhớ đệm ~2,8 giây và trang quản trị đầu tiên sau khi khởi động lại phải chờ
      * hết phần khởi động đó. Seeder chạy sau (trong callRunners) và tự nạp lại khoá nào nó ghi.

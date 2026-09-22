@@ -347,11 +347,6 @@ public class TongHopQuanTri {
         }
     }
 
-    /** Tự lấy bản chụp kho (một lượt) — cho nơi gọi chỉ cần chi phí. */
-    public ChiPhi chiPhi() {
-        return chiPhi(boNho.dsVatTu());
-    }
-
     /**
      * Chi phí tính trên MỘT bản chụp kho nơi gọi đã lấy sẵn: nơi nào vừa cần chi phí
      * vừa cần chính danh sách kho thì truyền vào, khỏi hai lượt đọc rơi vào hai thế hệ
@@ -404,53 +399,129 @@ public class TongHopQuanTri {
             cuon.add(m);
         }
 
+        GiaGram gg = giaGram(cp, vt, tiLeLai);
+
         Map<String, Object> ra = new LinkedHashMap<>();
         ra.put("chiPhi", cp.thanhMap());
         ra.put("doanhThu", doanhThu);
         ra.put("laiLo", doanhThu - cp.tongChiPhi());
         ra.put("tiLeLai", tiLeLai);
-        ra.put("giaVonMoiGram", Math.round(cp.giaNhuaTrungBinhMoiGram()));
-        ra.put("giaBanMoiGram", Math.round(giaBanMoiGram(cp, tiLeLai)));
+        gg.ghiVao(ra);
         ra.put("cuonNhua", cuon);
         return ra;
     }
 
     /**
-     * Giá dự kiến các mẫu in chủ shop tự nhập (tên + số gram). CHỈ TÍNH, không lưu gì.
-     * tienNhua = gram × giá nhựa trung bình; giaBan = gram × giá bán/gram, làm tròn tới 500đ;
-     * lai = giaBan − tiền nhựa (chưa làm tròn) rồi mới làm tròn — y như trang cũ.
+     * Giá theo gram KÈM TIỀN MÁY — chung cho von và gia-mau-in.
+     *   giaVonNhua     = giá nhựa trung bình mỗi gram, làm tròn (ô giaVonMoiGram như trước)
+     *   tienMayMoiGram = làm tròn(tiền máy mỗi giờ ÷ nhựa in được mỗi giờ)
+     *   giaVonTong     = giaVonNhua + tienMayMoiGram
+     *   giaBan         = làm tròn(giaVonTong × (1 + tỉ lệ lãi / 100)) — cùng cách làm tròn như trước
+     *   giaBanNhua     = giá bán mỗi gram CHỈ tính nhựa, đúng công thức cũ (để đối chiếu)
+     * Tính trên các số ĐÃ LÀM TRÒN mà trang in ra, để phép tính trên trang cộng / chia khớp từng dòng.
+     */
+    private record GiaGram(ChiPhiMayService.ChiPhiMay may, ChiPhiMayService.NangSuat nangSuat,
+                           long giaVonNhua, long tienMayMoiGram, long giaVonTong, long giaBan, long giaBanNhua) {
+        /** Các ô giá theo gram của von / gia-mau-in, đúng thứ tự trong JSON. */
+        void ghiVao(Map<String, Object> ra) {
+            ra.put("giaVonMoiGram", giaVonNhua);
+            ra.put("chiPhiMayMoiGio", may.tongMoiGio());
+            ra.put("gramMoiGio", ChiPhiMayService.soGon(nangSuat.gramMoiGio()));
+            ra.put("nguonGramMoiGio", nangSuat.nguon());
+            ra.put("soBienTheCoGioIn", nangSuat.soBienThe());
+            ra.put("tienMayMoiGram", tienMayMoiGram);
+            ra.put("giaVonTongMoiGram", giaVonTong);
+            ra.put("giaBanMoiGram", giaBan);
+            ra.put("giaBanNhuaMoiGram", giaBanNhua);
+        }
+    }
+
+    /**
+     * Chi phí máy tính trên CÙNG bản chụp kho với phần nhựa (máy in cũng nằm trong kho) + bộ
+     * cài đặt; nhựa in được mỗi giờ tự tính từ sản phẩm (ChiPhiMayService.nangSuat). Tất cả đọc
+     * từ bộ nhớ đệm, nên sửa sản phẩm / kho / định mức là lần hỏi sau thấy số mới.
+     */
+    private GiaGram giaGram(ChiPhi cp, List<Map<String, Object>> vt, double tiLeLai) {
+        ChiPhiMayService.ChiPhiMay may = ChiPhiMayService.tinh(vt, boNho.caiDat().theoKhoa());
+        ChiPhiMayService.NangSuat ns = ChiPhiMayService.nangSuat(boNho.dsSanPham(true), may);
+        long giaVonNhua = Math.round(cp.giaNhuaTrungBinhMoiGram());
+        long tienMayMoiGram = Math.round(may.tongMoiGio() / ns.gramMoiGio());
+        long giaVonTong = giaVonNhua + tienMayMoiGram;
+        return new GiaGram(may, ns, giaVonNhua, tienMayMoiGram, giaVonTong,
+                Math.round(giaVonTong * heSoLai(tiLeLai)),
+                Math.round(cp.giaNhuaTrungBinhMoiGram() * heSoLai(tiLeLai)));
+    }
+
+    /**
+     * Giá dự kiến các mẫu in chủ shop tự nhập: {ten, gram, phut?}. CHỈ TÍNH, không lưu gì.
+     *   phut    = phút in chủ shop gõ; không gõ (hoặc không phải số dương) thì ước theo nhựa in
+     *             được mỗi giờ: làm tròn(gram ÷ g/giờ × 60), phutUocTinh = true
+     *   tienNhua = làm tròn(gram × giá nhựa trung bình)
+     *   tienMay  = làm tròn(phut × tiền máy mỗi giờ ÷ 60) — cùng công thức tiền máy của sản phẩm
+     *   giaVon   = tienNhua + tienMay
+     *   giaBan   = giaVon × (1 + tỉ lệ lãi / 100), làm tròn tới 500đ như trước
+     *   lai      = giaBan − giaVon
      */
     public Map<String, Object> giaMauIn(List<?> mauIn, Double tiLeLaiGui) {
         double tiLeLai = chuanTiLeLai(tiLeLaiGui);
-        ChiPhi cp = chiPhi();
-        double giaBanGram = giaBanMoiGram(cp, tiLeLai);
+        // MỘT bản chụp kho cho cả giá nhựa lẫn giá máy
+        List<Map<String, Object>> vt = boNho.dsVatTu();
+        ChiPhi cp = chiPhi(vt);
+        GiaGram gg = giaGram(cp, vt, tiLeLai);
+        long tienMayMoiGio = gg.may().tongMoiGio();
+        double gramMoiGio = gg.nangSuat().gramMoiGio();
 
         List<Map<String, Object>> ds = new ArrayList<>();
         for (Object o : mauIn == null ? List.of() : mauIn) {
             if (!(o instanceof Map<?, ?> mau)) continue;
             long gram = so(mau.get("gram"));
-            double tienNhua = gram * cp.giaNhuaTrungBinhMoiGram();
-            long giaBan = Math.round(gram * giaBanGram / 500) * 500;
+            Long phutGui = phutDuong(mau.get("phut"));
+            long phut = phutGui != null ? phutGui : Math.max(0, Math.round(gram / gramMoiGio * 60));
+            long tienNhua = Math.round(gram * cp.giaNhuaTrungBinhMoiGram());
+            // Nhân bằng số thực: phút (ước theo gram) rất lớn nhân kiểu long là tràn số, ra tiền âm
+            long tienMay = Math.round(phut * (double) tienMayMoiGio / 60.0);
+            long giaVon = tienNhua + tienMay;
+            long giaBan = Math.round(giaVon * heSoLai(tiLeLai) / 500) * 500;
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("ten", mau.get("ten") == null ? "" : String.valueOf(mau.get("ten")));
             m.put("gram", gram);
-            m.put("tienNhua", Math.round(tienNhua));
+            m.put("phut", phut);
+            m.put("phutUocTinh", phutGui == null);
+            m.put("tienNhua", tienNhua);
+            m.put("tienMay", tienMay);
+            m.put("giaVon", giaVon);
             m.put("giaBan", giaBan);
-            m.put("lai", Math.round(giaBan - tienNhua));
+            m.put("lai", giaBan - giaVon);
             ds.add(m);
         }
 
         Map<String, Object> ra = new LinkedHashMap<>();
         ra.put("tiLeLai", tiLeLai);
-        ra.put("giaVonMoiGram", Math.round(cp.giaNhuaTrungBinhMoiGram()));
-        ra.put("giaBanMoiGram", Math.round(giaBanGram));
+        gg.ghiVao(ra);
         ra.put("mauIn", ds);
         return ra;
     }
 
-    private static double giaBanMoiGram(ChiPhi cp, double tiLeLai) {
-        return cp.giaNhuaTrungBinhMoiGram() * (1 + tiLeLai / 100);
+    /** 120 (%) -> 2.2 */
+    private static double heSoLai(double tiLeLai) {
+        return 1 + tiLeLai / 100;
     }
+
+    /** Phút in chủ shop gõ (số hoặc chuỗi số), làm tròn; thiếu / không phải số dương -> null (ước tính). */
+    private static Long phutDuong(Object v) {
+        double x;
+        if (v instanceof Number n) x = n.doubleValue();
+        else if (v instanceof String s && !s.isBlank()) {
+            try { x = Double.parseDouble(s.trim()); } catch (NumberFormatException boQua) { return null; }
+        } else return null;
+        // Quá 1 năm in liên tục cho một cái là gõ nhầm: coi như không gõ, để ước tính theo gram
+        if (!(x > 0) || x > PHUT_TOI_DA) return null;
+        long phut = Math.round(x);
+        return phut > 0 ? phut : null;
+    }
+
+    /** Một năm tính bằng phút — trần hợp lý cho thời gian in một cái. */
+    private static final long PHUT_TOI_DA = 365L * 24 * 60;
 
     /* ============================================================
        tk-san-pham — san-pham.html

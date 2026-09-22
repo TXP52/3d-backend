@@ -26,7 +26,8 @@ import java.util.Set;
  * một biến thể mặc định (dữ liệu cũ) cho ra y hệt JSON trước khi có biến thể.
  *
  * Object trả về KHÔNG sửa được (dùng chung cho mọi request); muốn thêm trường
- * thì chép ra new LinkedHashMap<>(dto) rồi thêm.
+ * thì chép ra new LinkedHashMap<>(dto) rồi thêm — y như kemChiPhiMay ghép tiền máy
+ * cho trang quản trị lúc trả lời.
  */
 public final class SanPhamDto {
 
@@ -130,6 +131,7 @@ public final class SanPhamDto {
             b.put("giaHienThi", giaHien);
             b.put("tonKho", bt.getTonKho());
             b.put("soLuong", bt.getSoLuong());
+            b.put("thoiGianInPhut", bt.getThoiGianInPhut());   // phút in MỘT cái
             b.put("nhieuMau", bt.getNhieuMau());
             b.put("trangThai", bt.getTrangThai());    // null = theo trạng thái sản phẩm
             b.put("trangThaiHienThi", bt.getTrangThai() == null || bt.getTrangThai().isBlank()
@@ -154,6 +156,8 @@ public final class SanPhamDto {
 
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", sp.getId());
+        // Dòng cũ chưa có mã thì "SP-<id>" — đúng mã trang web vẫn hiện trước giờ
+        m.put("maSanPham", sp.getMaHienThi());
         m.put("ten", sp.getTen());
         m.put("moTa", sp.getMoTa());
         m.put("gia", sp.getGia());
@@ -187,6 +191,61 @@ public final class SanPhamDto {
         m.put("boSuuTap", boSuuTap == null ? List.of() : boSuuTap);
         return Collections.unmodifiableMap(m);
     }
+
+    /**
+     * Bản sao DTO sản phẩm KÈM TIỀN MÁY — chỉ trang quản trị thấy (web khách dựng DTO gọn
+     * riêng, không bao giờ đi qua đây).
+     *
+     * Không nằm sẵn trong bộ nhớ đệm sản phẩm: chi phí chạy máy mỗi giờ suy từ máy in trong
+     * kho + bảng cai_dat (ChiPhiMayService), nên ghép lúc trả lời — sửa giá máy hay định mức
+     * điện / bảo trì là thấy số mới ngay, khỏi nạp lại cả bộ sản phẩm.
+     *
+     * Thêm vào mỗi biến thể (cuối object):
+     *   tienMayMoiCai = làm tròn(phút in một cái / 60 × tiền máy mỗi giờ)
+     *   tienMay       = tienMayMoiCai × số cái đã in
+     *   giaVonMoiCai  = làm tròn(tiền nhựa / số cái đã in) + tienMayMoiCai
+     *                   (tiền nhựa đã gồm gram thừa; đúng bằng nhựa của MỘT cái cả khi đếm
+     *                   một màu lẫn nhiều màu, vì số cái đã được chuẩn hoá theo dòng nhựa)
+     * và vào sản phẩm: tongPhutIn = Σ phút × số cái, tienMay = Σ, giaVonMoiCaiMin / Max.
+     *
+     * @param tienMayMoiGio tổng tiền máy mỗi giờ in (₫, đã làm tròn — đúng số khoi-tao chi-phi-may trả)
+     */
+    public static Map<String, Object> kemChiPhiMay(Map<String, Object> sp, long tienMayMoiGio) {
+        List<Map<String, Object>> dsBienThe = new ArrayList<>();
+        long tongPhut = 0, tienMay = 0;
+        long giaVonMin = Long.MAX_VALUE, giaVonMax = Long.MIN_VALUE;
+        for (Object o : sp.get("bienThe") instanceof List<?> ds ? ds : List.of()) {
+            if (!(o instanceof Map<?, ?> tho)) continue;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> bt = (Map<String, Object>) tho;
+            long phut = so(bt.get("thoiGianInPhut"));
+            long soCai = Math.max(1, so(bt.get("soLuong")));
+            long mayMoiCai = Math.round(phut * tienMayMoiGio / 60.0);
+            long nhuaMoiCai = Math.round(so(bt.get("tienNhua")) / (double) soCai);
+            long giaVon = nhuaMoiCai + mayMoiCai;
+
+            Map<String, Object> b = new LinkedHashMap<>(bt);
+            b.put("tienMayMoiCai", mayMoiCai);
+            b.put("tienMay", mayMoiCai * soCai);
+            b.put("giaVonMoiCai", giaVon);
+            dsBienThe.add(Collections.unmodifiableMap(b));
+
+            tongPhut += phut * soCai;
+            tienMay += mayMoiCai * soCai;
+            giaVonMin = Math.min(giaVonMin, giaVon);
+            giaVonMax = Math.max(giaVonMax, giaVon);
+        }
+        Map<String, Object> m = new LinkedHashMap<>(sp);
+        m.put("bienThe", Collections.unmodifiableList(dsBienThe));
+        m.put("tongPhutIn", tongPhut);
+        m.put("tienMay", tienMay);
+        // Sản phẩm chưa có biến thể nào (chỉ khi sửa tay trên database): 0 chứ đừng trả số vô cực
+        m.put("giaVonMoiCaiMin", dsBienThe.isEmpty() ? 0L : giaVonMin);
+        m.put("giaVonMoiCaiMax", dsBienThe.isEmpty() ? 0L : giaVonMax);
+        return Collections.unmodifiableMap(m);
+    }
+
+    private static long so(Object v) { return v instanceof Number n ? n.longValue() : 0L; }
 
     /** Một dòng màu {id, ten, maMau} của sản phẩm. */
     private static Map<String, Object> dongMau(MauSac mau) {

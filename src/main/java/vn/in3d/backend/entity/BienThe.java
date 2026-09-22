@@ -70,6 +70,14 @@ public class BienThe extends BanGhi {
     @Column(name = "thu_tu", nullable = false)
     private Integer thuTu = 0;
 
+    /**
+     * Thời gian in MỘT cái của biến thể (phút). Nhân với chi phí chạy máy mỗi giờ
+     * (khấu hao + điện + bảo trì, xem ChiPhiMayService) ra tiền máy của một cái.
+     * 0 = chưa nhập.
+     */
+    @Column(name = "thoi_gian_in_phut", nullable = false)
+    private Integer thoiGianInPhut = 0;
+
     // created_at / updated_at / is_deleted nằm ở lớp cha BanGhi
 
     // Getter / Setter
@@ -98,6 +106,8 @@ public class BienThe extends BanGhi {
     public void setMacDinh(Boolean macDinh) { this.macDinh = Boolean.TRUE.equals(macDinh); }
     public Integer getThuTu() { return thuTu == null ? 0 : thuTu; }
     public void setThuTu(Integer thuTu) { this.thuTu = thuTu == null ? 0 : thuTu; }
+    public Integer getThoiGianInPhut() { return thoiGianInPhut == null || thoiGianInPhut < 0 ? 0 : thoiGianInPhut; }
+    public void setThoiGianInPhut(Integer phut) { this.thoiGianInPhut = phut == null || phut < 0 ? 0 : phut; }
 
     /** Danh sách ảnh dạng list (ảnh đầu = ảnh đại diện biến thể). */
     @Transient

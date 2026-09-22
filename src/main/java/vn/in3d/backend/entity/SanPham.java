@@ -14,6 +14,15 @@ public class SanPham extends BanGhi {
     @Column(nullable = false)
     private String ten;
 
+    /**
+     * MÃ SẢN PHẨM chủ shop tự đặt (chữ, số, - _ . tối đa 40 ký tự); để trống thì backend
+     * sinh "SP-<số lớn nhất đang dùng + 1>". Không trùng giữa các sản phẩm CHƯA xoá, không
+     * phân biệt hoa thường (chỉ mục san_pham_ma_uq); xoá mềm là nhả mã cho sản phẩm khác.
+     * null = dòng tạo từ trước khi có cột này — mọi chỗ hiển thị coi như "SP-<id>" (getMaHienThi).
+     */
+    @Column(name = "ma_san_pham", length = 40)
+    private String maSanPham;
+
     @Column(name = "mo_ta", columnDefinition = "text")
     private String moTa;
 
@@ -96,6 +105,20 @@ public class SanPham extends BanGhi {
     public void setId(Long id) { this.id = id; }
     public String getTen() { return ten; }
     public void setTen(String ten) { this.ten = ten; }
+    public String getMaSanPham() { return maSanPham; }
+    public void setMaSanPham(String maSanPham) { this.maSanPham = maSanPham; }
+
+    /**
+     * Mã đang HIỂN THỊ: mã đã lưu, dòng cũ chưa có mã thì "SP-<id>" — đúng mã web vẫn hiện
+     * từ trước tới nay, và cũng là mã phần sinh mã / kiểm tra trùng coi là "đang dùng".
+     */
+    @Transient
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public String getMaHienThi() {
+        if (maSanPham != null && !maSanPham.isBlank()) return maSanPham;
+        return id == null ? null : "SP-" + id;
+    }
+
     public String getMoTa() { return moTa; }
     public void setMoTa(String moTa) { this.moTa = moTa; }
     public Long getGia() { return gia; }

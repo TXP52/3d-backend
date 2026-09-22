@@ -8,6 +8,7 @@ import vn.in3d.backend.dto.DonTayRequest;
 import vn.in3d.backend.entity.DonHang;
 import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.service.BoNhoDem;
+import vn.in3d.backend.service.ChiPhiMayService;
 import vn.in3d.backend.service.DonHangService;
 import vn.in3d.backend.service.TongHopQuanTri;
 import vn.in3d.backend.service.XacThucService;
@@ -23,6 +24,7 @@ import java.util.Map;
  *   GET  /api/quan-tri/khoi-tao?bo=san-pham,tk-san-pham,dem[&tiLeLai=120][&lamMoi=1]
  *   POST /api/quan-tri/lam-moi                  nạp lại toàn bộ bộ nhớ đệm (sau khi sửa tay trên Supabase) — chỉ admin
  *   POST /api/quan-tri/von/gia-mau-in           tính giá các mẫu in chủ shop tự nhập (chỉ tính, không lưu)
+ *   PUT  /api/quan-tri/chi-phi-may              sửa định mức chi phí chạy máy in (bảng cai_dat)
  *   POST /api/quan-tri/don-hang                 chủ shop gõ đơn tay (Facebook / Zalo / tại shop) — chỉ admin
  *   POST/PUT/DELETE /api/quan-tri/khach-hang    danh bạ khách hàng — chỉ admin
  *
@@ -41,18 +43,22 @@ public class QuanTriController {
     private final TongHopQuanTri tongHop;
     private final XacThucService xacThuc;
     private final DonHangService donHangService;
+    private final ChiPhiMayService chiPhiMay;
 
     public QuanTriController(BoNhoDem boNho, TongHopQuanTri tongHop, XacThucService xacThuc,
-                             DonHangService donHangService) {
+                             DonHangService donHangService, ChiPhiMayService chiPhiMay) {
         this.boNho = boNho;
         this.tongHop = tongHop;
         this.xacThuc = xacThuc;
         this.donHangService = donHangService;
+        this.chiPhiMay = chiPhiMay;
     }
 
     /**
      * Trả object CHỈ gồm các khoá được hỏi (khoá lạ bỏ qua, không có trong kết quả).
      * Khoá bộ dữ liệu có giá trị y hệt API tương ứng (san-pham = GET /api/san-pham?tatCa=true...).
+     * chi-phi-may = chi phí chạy máy in mỗi giờ (ChiPhiMayService.thanhMap) — đúng con số đã
+     * dùng để ghép tiền máy vào san-pham trong cùng request.
      * nguoi-dung và khach-hang cần header Authorization của admin như GET /api/nguoi-dung;
      * thiếu / sai / không phải admin thì giá trị là null (không báo lỗi cả request).
      * lamMoi=1 cũng chỉ admin mới được, người khác gửi lên thì bỏ qua (xem POST /lam-moi).
@@ -63,7 +69,7 @@ public class QuanTriController {
                                        @RequestParam(required = false) String lamMoi,
                                        @RequestHeader(value = "Authorization", required = false) String authorization) {
         Boolean laAdmin = null;   // chỉ đọc token khi có khoá cần
-        // Làm mới = 10 truy vấn toàn bảng và làm nguội bộ nhớ đệm của mọi người: CHỈ admin.
+        // Làm mới = 11 truy vấn toàn bảng và làm nguội bộ nhớ đệm của mọi người: CHỈ admin.
         // Không phải admin thì bỏ qua lặng lẽ (request vẫn trả dữ liệu bình thường) —
         // một URL cũ còn dính lamMoi=1, một lượt prefetch hay con bot đều không hại được.
         if ("1".equals(lamMoi) || "true".equalsIgnoreCase(lamMoi)) {
@@ -72,11 +78,20 @@ public class QuanTriController {
         }
 
         Map<String, Object> ra = new LinkedHashMap<>();
+        // Chi phí máy tính MỘT lần cho cả request: san-pham và chi-phi-may cùng một con số
+        ChiPhiMayService.ChiPhiMay[] chiPhi = new ChiPhiMayService.ChiPhiMay[1];
         for (String phan : bo.split(",")) {
             String khoa = phan.trim();
             if (khoa.isEmpty() || ra.containsKey(khoa)) continue;
             switch (khoa) {
-                case "san-pham" -> ra.put(khoa, boNho.dsSanPham(true));
+                case "san-pham" -> {
+                    if (chiPhi[0] == null) chiPhi[0] = chiPhiMay.tinhAnToan();
+                    ra.put(khoa, ChiPhiMayService.kemChiPhi(boNho.dsSanPham(true), chiPhi[0]));
+                }
+                case "chi-phi-may" -> {
+                    if (chiPhi[0] == null) chiPhi[0] = chiPhiMay.tinh();
+                    ra.put(khoa, ChiPhiMayService.thanhMap(chiPhi[0]));
+                }
                 case "vat-tu" -> ra.put(khoa, boNho.dsVatTu());
                 case "nha-cung-cap" -> ra.put(khoa, boNho.dsNhaCungCap());
                 case "mau-sac" -> ra.put(khoa, boNho.dsMauSac());
@@ -114,9 +129,9 @@ public class QuanTriController {
     }
 
     /**
-     * Nút "Làm mới": bỏ và nạp lại cả 10 bộ dữ liệu, chờ nạp xong mới trả. Không ghi gì vào database.
+     * Nút "Làm mới": bỏ và nạp lại cả 11 bộ dữ liệu, chờ nạp xong mới trả. Không ghi gì vào database.
      *
-     * CHỈ ADMIN: mỗi lượt là 10 truy vấn toàn bảng và trong lúc đó mọi request khác cũng
+     * CHỈ ADMIN: mỗi lượt là 11 truy vấn toàn bảng và trong lúc đó mọi request khác cũng
      * phải chờ database, nên ai cũng gọi được thì chỉ cần một vòng lặp là tắt luôn tác dụng
      * của bộ nhớ đệm và hút hết kết nối của pooler Supabase.
      * Hai lượt bấm sát nhau được BoNhoDem gộp lại (trả thời gian của lượt vừa nạp).
@@ -135,8 +150,9 @@ public class QuanTriController {
 
     /**
      * Giá dự kiến các mẫu in (danh sách chủ shop tự nhập, đang lưu ở trình duyệt).
-     * Body: { "tiLeLai": 120, "mauIn": [{ "ten": "Móc khoá", "gram": 12 }] } — tiLeLai có thể
-     * gửi qua query thay cho body. CHỈ TÍNH trên bộ nhớ đệm kho, không lưu gì.
+     * Body: { "tiLeLai": 120, "mauIn": [{ "ten": "Móc khoá", "gram": 12, "phut": 45 }] } — phut
+     * (phút in) không bắt buộc, thiếu thì ước theo gram; tiLeLai có thể gửi qua query thay cho body.
+     * Giá gồm tiền nhựa + tiền máy (TongHopQuanTri.giaMauIn). CHỈ TÍNH trên bộ nhớ đệm, không lưu gì.
      */
     @PostMapping("/von/gia-mau-in")
     public Map<String, Object> giaMauIn(@RequestBody(required = false) Map<String, Object> body,
@@ -145,6 +161,21 @@ public class QuanTriController {
         Double tiLe = b.get("tiLeLai") != null ? soThuc(b.get("tiLeLai")) : soThuc(tiLeLai);
         Object mauIn = b.get("mauIn");
         return tongHop.giaMauIn(mauIn instanceof List<?> ds ? ds : List.of(), tiLe);
+    }
+
+    /* ============================================================
+       Chi phí chạy máy in
+       ============================================================ */
+
+    /**
+     * Sửa định mức chi phí máy: {tuoiThoGio?, congSuatW?, giaDienKwh?, baoTriMoiGio?, gramMoiGio?}.
+     * Ô không gửi thì để yên, gửi null / rỗng là quay về mặc định, số thì phải dương.
+     * Trả đúng object khoá chi-phi-may của khoi-tao. Như các lệnh ghi quản trị khác hiện
+     * nay, chưa đòi token (xem hợp đồng v3 mục 2).
+     */
+    @PutMapping("/chi-phi-may")
+    public Map<String, Object> suaChiPhiMay(@RequestBody(required = false) Map<String, Object> body) {
+        return chiPhiMay.luu(body);
     }
 
     /* ============================================================

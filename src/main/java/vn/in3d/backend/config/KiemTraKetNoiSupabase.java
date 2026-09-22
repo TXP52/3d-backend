@@ -39,7 +39,11 @@ public class KiemTraKetNoiSupabase {
             Map.entry("nguoi_dung",        List.of("id", "email", "mat_khau_hash", "vai_tro", "is_deleted")),
             Map.entry("san_pham",          List.of("id", "ten", "gia", "trang_thai", "loai_san_pham",
                                                    "danh_muc_id", "so_luong", "nhieu_mau", "danh_sach_anh",
-                                                   "is_deleted")),
+                                                   "ma_san_pham", "is_deleted")),
+            // Biến thể + thời gian in, và bảng định mức chi phí máy — sql/2026-09-21-ma-san-pham-gio-in.sql
+            Map.entry("bien_the",          List.of("id", "san_pham_id", "ton_kho", "mac_dinh",
+                                                   "thoi_gian_in_phut", "is_deleted")),
+            Map.entry("cai_dat",           List.of("khoa", "gia_tri", "mo_ta", "updated_at")),
             // Bảng nối: mỗi dòng là "in mấy cái bằng cuộn nhựa nào"
             Map.entry("san_pham_vat_tu",   List.of("id", "san_pham_id", "vat_tu_id",
                                                    "so_luong", "gram_nhua", "gram_thua")),
@@ -112,7 +116,7 @@ public class KiemTraKetNoiSupabase {
 
     /**
      * Soát từng bảng/cột app cần; thiếu thì dừng ngay kèm danh sách cụ thể.
-     * Hỏi MỘT lượt cho cả 12 bảng rồi chia trong bộ nhớ — bản cũ hỏi từng bảng,
+     * Hỏi MỘT lượt cho cả 14 bảng rồi chia trong bộ nhớ — bản cũ hỏi từng bảng,
      * 12 lượt đi-về tới Sydney là ~3 giây mỗi lần khởi động.
      */
     private void kiemTraSchema(Connection c) throws Exception {

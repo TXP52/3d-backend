@@ -28,8 +28,10 @@ import java.util.Set;
  *   GET /api/cua-hang/bo-suu-tap                   các bộ sưu tập đang khoe
  *   GET /api/cua-hang/bo-suu-tap/{duongDan}        một bộ + sản phẩm của bộ
  *
- * Sản phẩm trả dạng "GỌN": KHÔNG có số liệu giá vốn (cuộn nhựa, gram, tiền nhựa) — mấy
- * thứ đó chỉ trang quản trị được xem. Giá sau khuyến mãi, nhãn trạng thái, chữ giá
+ * Sản phẩm trả dạng "GỌN": KHÔNG có số liệu giá vốn (cuộn nhựa, gram, tiền nhựa, thời gian
+ * in, tiền máy, giá vốn mỗi cái) — mấy thứ đó chỉ trang quản trị được xem. Tiền máy vốn
+ * không nằm trong bộ nhớ đệm sản phẩm (chỉ trang quản trị ghép lúc trả lời), còn mọi ô
+ * dưới đây đều chép TỪNG ô một, nên có thêm trường giá vốn nào ở DTO quản trị cũng không lọt ra. Giá sau khuyến mãi, nhãn trạng thái, chữ giá
  * hiển thị và "đặt được hay không" backend tính sẵn, web khách chỉ việc vẽ.
  *
  * Mỗi sản phẩm kèm danh sách BIẾN THỂ (phân loại) cũng đã tính sẵn giá / nhãn / đặt
@@ -314,6 +316,7 @@ public class CuaHangController {
 
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", id);
+        m.put("maSanPham", sp.get("maSanPham"));     // mã chủ shop đặt (dòng cũ: SP-<id>)
         m.put("ten", sp.get("ten"));
         m.put("moTa", sp.get("moTa"));
         m.put("gia", gia);
