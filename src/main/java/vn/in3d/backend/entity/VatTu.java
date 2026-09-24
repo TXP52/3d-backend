@@ -30,13 +30,24 @@ public class VatTu extends BanGhi {
     @Column(name = "mau_sac_id")
     private Long mauSacId;
 
-    /** Giá mua 1 đơn vị (VNĐ) */
+    /**
+     * Giá mua 1 đơn vị (VNĐ) — BÌNH QUÂN các đợt nhập (bảng lo_nhap), đã làm tròn.
+     * Backend ghi lại cột này mỗi lần đợt nhập thay đổi; chỉ để hiển thị và so sánh,
+     * tiền thật luôn lấy từ tienMua để không cộng dồn sai số làm tròn.
+     */
     @Column(nullable = false)
     private Long gia = 0L;
 
-    /** Số lượng đang có trong kho */
+    /** Số lượng đang có trong kho = tổng số lượng các đợt nhập. */
     @Column(name = "so_luong", nullable = false)
     private Integer soLuong = 1;
+
+    /**
+     * Tổng tiền đã bỏ ra mua vật tư này = Σ (đơn giá × số lượng) của từng đợt nhập.
+     * null = dòng cũ chưa có đợt nhập nào (backend tự suy gia × so_luong như trước).
+     */
+    @Column(name = "tien_mua")
+    private Long tienMua;
 
     /** Khối lượng 1 đơn vị (gram) — cuộn nhựa thường 1000g; máy in để 0 */
     @Column(name = "khoi_luong_gram", nullable = false)
@@ -71,17 +82,27 @@ public class VatTu extends BanGhi {
     @Column(name = "ghi_chu", columnDefinition = "text")
     private String ghiChu;
 
-    /** Tổng tiền đã bỏ ra mua vật tư này = giá × số lượng. */
+    /**
+     * Tổng tiền đã bỏ ra mua vật tư này: cộng từ các đợt nhập (tien_mua).
+     * Dòng cũ chưa có đợt nhập nào thì vẫn là giá × số lượng như trước.
+     */
     @Transient
     public long getTongTienMua() {
+        if (tienMua != null) return tienMua;
         return (gia == null ? 0 : gia) * (soLuong == null ? 0 : soLuong);
     }
 
-    /** Đơn giá mỗi gram (VNĐ/g) — chỉ có nghĩa với nhựa. */
+    /**
+     * Đơn giá mỗi gram (VNĐ/g) — chỉ có nghĩa với nhựa.
+     * Tính từ TỔNG tiền / TỔNG gram đã mua: nhiều đợt khác giá thì ra đúng giá bình
+     * quân, một đợt thì đúng bằng giá cuộn / gram mỗi cuộn như trước.
+     */
     @Transient
     public double getDonGiaMoiGram() {
         if (khoiLuongGram == null || khoiLuongGram <= 0) return 0;
-        return (double) (gia == null ? 0 : gia) / khoiLuongGram;
+        int sl = soLuong == null ? 0 : soLuong;
+        if (sl <= 0) return (double) (gia == null ? 0 : gia) / khoiLuongGram;
+        return (double) getTongTienMua() / ((long) khoiLuongGram * sl);
     }
 
     /**
@@ -110,11 +131,16 @@ public class VatTu extends BanGhi {
         return Math.max(0, getTongCoThe() - (daDungGram == null ? 0 : daDungGram));
     }
 
-    /** Tiền đã tiêu hao: nhựa tính theo gram, thứ khác theo số cái đã dùng. */
+    /**
+     * Tiền đã tiêu hao: nhựa tính theo gram, thứ khác theo số cái đã dùng.
+     * Cả hai đều dùng giá BÌNH QUÂN các đợt nhập (không biết cái đang dùng thuộc đợt nào).
+     */
     @Transient
     public long getTienDaDung() {
         int daDung = daDungGram == null ? 0 : daDungGram;
         if (isLaNhua()) return Math.round(getDonGiaMoiGram() * daDung);
+        int sl = soLuong == null ? 0 : soLuong;
+        if (sl > 0) return Math.round((double) getTongTienMua() / sl * daDung);
         return (gia == null ? 0 : gia) * daDung;
     }
 
@@ -159,6 +185,8 @@ public class VatTu extends BanGhi {
     public void setGia(Long gia) { this.gia = gia; }
     public Integer getSoLuong() { return soLuong; }
     public void setSoLuong(Integer soLuong) { this.soLuong = soLuong; }
+    public Long getTienMua() { return tienMua; }
+    public void setTienMua(Long tienMua) { this.tienMua = tienMua; }
     public Integer getKhoiLuongGram() { return khoiLuongGram; }
     public void setKhoiLuongGram(Integer khoiLuongGram) { this.khoiLuongGram = khoiLuongGram; }
     public Integer getDaDungGram() { return daDungGram; }

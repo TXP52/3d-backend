@@ -27,9 +27,12 @@ public class DonHang extends BanGhi {
     public static final Map<String, String> KENH_HOP_LE;
     static {
         Map<String, String> kenh = new LinkedHashMap<>();
-        kenh.put("website", "Website");
         kenh.put("facebook", "Facebook");
         kenh.put("zalo", "Zalo");
+        kenh.put("shopee", "Shopee");
+        kenh.put("tiktok", "TikTok");
+        kenh.put("threads", "Threads");
+        kenh.put("website", "Website");
         kenh.put("tai_shop", "Tại shop");
         kenh.put("khac", "Khác");
         KENH_HOP_LE = Collections.unmodifiableMap(kenh);
@@ -81,11 +84,27 @@ public class DonHang extends BanGhi {
             columnDefinition = "bigint default 0 not null")
     private Long tienGiamSanPham = 0L;
 
+    /**
+     * Khoản CỘNG THÊM vào đơn ngoài tiền hàng: phí ship khách trả, gói quà, phụ thu...
+     * Chủ shop gõ ở dòng "Khác" trong form tạo đơn.
+     */
+    @Column(name = "phu_thu", nullable = false,
+            columnDefinition = "bigint default 0 not null")
+    private Long phuThu = 0L;
+
+    /**
+     * Khoản TRỪ ĐI khi tính tổng: phí sàn (Shopee, TikTok), phí ship shop chịu...
+     * Tiền shop thực nhận = tiền hàng - giảm giá + phụ thu - phí.
+     */
+    @Column(name = "phi", nullable = false,
+            columnDefinition = "bigint default 0 not null")
+    private Long phi = 0L;
+
     @Column(name = "trang_thai", nullable = false)
     private String trangThai = "cho_xac_nhan";
 
     /**
-     * Bán qua đâu: website | facebook | zalo | tai_shop | khac.
+     * Bán qua đâu: facebook | zalo | shopee | tiktok | threads | website | tai_shop | khac.
      * Đơn khách tự đặt trên web luôn là website; đơn chủ shop gõ tay thì chọn kênh.
      */
     @Column(name = "kenh", nullable = false, length = 20)
@@ -134,9 +153,17 @@ public class DonHang extends BanGhi {
     public Long getTienGiamSanPham() { return tienGiamSanPham == null ? 0L : tienGiamSanPham; }
     public void setTienGiamSanPham(Long v) { this.tienGiamSanPham = v == null ? 0L : v; }
 
-    /** Tiền hàng sau giảm giá món, trước khi trừ mã đơn hàng. */
+    public Long getPhuThu() { return phuThu == null ? 0L : phuThu; }
+    public void setPhuThu(Long v) { this.phuThu = v == null ? 0L : v; }
+    public Long getPhi() { return phi == null ? 0L : phi; }
+    public void setPhi(Long v) { this.phi = v == null ? 0L : v; }
+
+    /**
+     * Tiền hàng sau giảm giá món, trước khi trừ mã đơn hàng.
+     * Tổng tiền đã cộng phụ thu và trừ phí nên phải gỡ hai khoản đó ra.
+     */
     @Transient
-    public Long getTamTinh() { return getTongTien() + getTienGiam(); }
+    public Long getTamTinh() { return getTongTien() + getTienGiam() - getPhuThu() + getPhi(); }
 
     /** Tiền hàng theo giá niêm yết, chưa trừ khoản nào. */
     @Transient

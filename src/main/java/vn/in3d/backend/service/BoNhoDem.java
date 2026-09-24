@@ -204,7 +204,8 @@ public class BoNhoDem implements SmartInitializingSingleton {
         });
         // Bộ SP chạy thêm một truy vấn song song trên chính hồ luồng này (xem NapDuLieu.napSanPham)
         sanPham    = dangKy(SP,  () -> nap.napSanPham(luongNap), TTL_MAC_DINH_MS);
-        vatTu      = dangKy(VT,  nap::napVatTu,      TTL_MAC_DINH_MS);
+        // Bộ VT cũng chạy thêm một truy vấn song song: các đợt nhập của từng vật tư
+        vatTu      = dangKy(VT,  () -> nap.napVatTu(luongNap), TTL_MAC_DINH_MS);
         mauSac     = dangKy(MS,  nap::napMauSac,     TTL_MAC_DINH_MS);
         nhaCungCap = dangKy(NCC, nap::napNhaCungCap, TTL_MAC_DINH_MS);
         danhMuc    = dangKy(DM,  nap::napDanhMuc,    TTL_MAC_DINH_MS);

@@ -48,8 +48,10 @@ public class KiemTraKetNoiSupabase {
             Map.entry("san_pham_vat_tu",   List.of("id", "san_pham_id", "vat_tu_id",
                                                    "so_luong", "gram_nhua", "gram_thua")),
             Map.entry("danh_muc",          List.of("id", "ten", "nhom", "thu_tu", "dang_hien", "is_deleted")),
+            // phu_thu / phi — sql/2026-09-24-don-hang-phi-phu-thu.sql
             Map.entry("don_hang",          List.of("id", "ma_don", "tong_tien", "ma_khuyen_mai", "tien_giam",
-                                                   "tien_giam_san_pham", "nguoi_dung_id", "is_deleted")),
+                                                   "tien_giam_san_pham", "nguoi_dung_id", "kenh",
+                                                   "phu_thu", "phi", "is_deleted")),
             Map.entry("don_hang_chi_tiet", List.of("id", "don_hang_id", "don_gia", "don_gia_goc", "so_luong")),
             Map.entry("thanh_toan",        List.of("id", "don_hang_id", "so_tien", "trang_thai")),
             Map.entry("khuyen_mai",        List.of("id", "ma", "kieu_ap_dung", "chi_khach_moi",
@@ -57,7 +59,10 @@ public class KiemTraKetNoiSupabase {
             Map.entry("bai_viet",          List.of("id", "tieu_de", "duong_dan", "chuyen_muc", "is_deleted")),
             Map.entry("mau_sac",           List.of("id", "ten", "ma_mau", "is_deleted")),
             Map.entry("vat_tu",            List.of("id", "ten", "loai", "gia", "trang_thai", "mau_sac_id",
-                                                   "danh_muc_id", "is_deleted")),
+                                                   "danh_muc_id", "tien_mua", "is_deleted")),
+            // Đợt nhập hàng của vật tư (mỗi đợt một giá) — sql/2026-09-24-lo-nhap-vat-tu.sql
+            Map.entry("lo_nhap",           List.of("id", "vat_tu_id", "ngay_nhap", "so_luong", "gia",
+                                                   "nha_cung_cap_id")),
             Map.entry("nha_cung_cap",      List.of("id", "ten", "is_deleted")));
 
     // Order thấp nhất: chạy trước mọi seeder, seeder không nên ghi vào schema hỏng

@@ -12,6 +12,7 @@ import vn.in3d.backend.entity.BoSuuTap;
 import vn.in3d.backend.entity.DanhMuc;
 import vn.in3d.backend.entity.DonHang;
 import vn.in3d.backend.entity.KhuyenMai;
+import vn.in3d.backend.entity.LoNhap;
 import vn.in3d.backend.entity.MauSac;
 import vn.in3d.backend.entity.NguoiDung;
 import vn.in3d.backend.entity.NhaCungCap;
@@ -22,6 +23,7 @@ import vn.in3d.backend.repository.BaiVietRepository;
 import vn.in3d.backend.repository.BoSuuTapRepository;
 import vn.in3d.backend.repository.DanhMucRepository;
 import vn.in3d.backend.repository.KhuyenMaiRepository;
+import vn.in3d.backend.repository.LoNhapRepository;
 import vn.in3d.backend.repository.MauSacRepository;
 import vn.in3d.backend.repository.NguoiDungRepository;
 import vn.in3d.backend.repository.NhaCungCapRepository;
@@ -58,6 +60,7 @@ public class NapDuLieu {
 
     private final SanPhamRepository sanPhamRepo;
     private final VatTuRepository vatTuRepo;
+    private final LoNhapRepository loNhapRepo;
     private final MauSacRepository mauSacRepo;
     private final NhaCungCapRepository nccRepo;
     private final DanhMucRepository danhMucRepo;
@@ -71,9 +74,10 @@ public class NapDuLieu {
                      NhaCungCapRepository nccRepo, DanhMucRepository danhMucRepo,
                      KhuyenMaiRepository khuyenMaiRepo, BaiVietRepository baiVietRepo,
                      NguoiDungRepository nguoiDungRepo, BoSuuTapRepository boSuuTapRepo,
-                     EntityManagerFactory emf) {
+                     LoNhapRepository loNhapRepo, EntityManagerFactory emf) {
         this.sanPhamRepo = sanPhamRepo;
         this.vatTuRepo = vatTuRepo;
+        this.loNhapRepo = loNhapRepo;
         this.mauSacRepo = mauSacRepo;
         this.nccRepo = nccRepo;
         this.danhMucRepo = danhMucRepo;
@@ -202,18 +206,57 @@ public class NapDuLieu {
         }
     }
 
-    /** Vật tư kèm tên màu / nhà cung cấp / loại: một truy vấn nối bảng. */
-    public BoNhoDem.DuLieuVatTu napVatTu() {
+    /**
+     * Vật tư kèm tên màu / nhà cung cấp / loại (một truy vấn nối bảng) và các ĐỢT NHẬP
+     * của từng vật tư. Hai truy vấn chạy SONG SONG trên
+     * hai kết nối (như napSanPham) nên cả bộ vẫn chỉ tốn thời gian của một lượt đi-về.
+     *
+     * @param luong luồng nạp của BoNhoDem; bận hết thì chính luồng này chạy nốt truy vấn
+     *              đợt nhập sau truy vấn chính.
+     */
+    public BoNhoDem.DuLieuVatTu napVatTu(Executor luong) {
+        FutureTask<Map<Long, List<Map<String, Object>>>> loNhapSongSong =
+                new FutureTask<>(this::napLoNhapTheoVatTu);
+        try {
+            luong.execute(loNhapSongSong);
+        } catch (RejectedExecutionException dangTat) {
+            // hồ luồng đang tắt: chạy tại chỗ bên dưới
+        }
+
+        List<Object[]> dongVatTu;
+        try {
+            dongVatTu = vatTuRepo.napKemTen();
+        } catch (RuntimeException | Error loi) {
+            // Truy vấn chính hỏng thì lượt nạp này bỏ: truy vấn đợt nhập chưa chạy thì khỏi chạy
+            loNhapSongSong.cancel(false);
+            throw loi;
+        }
+        loNhapSongSong.run();    // chưa luồng nào nhận thì chạy luôn ở đây; đang / đã chạy thì bỏ qua
+        Map<Long, List<Map<String, Object>>> loNhap = ketQua(loNhapSongSong);
+
         List<Map<String, Object>> danhSach = new ArrayList<>();
         Map<Long, Map<String, Object>> theoId = new HashMap<>();
-        for (Object[] dong : vatTuRepo.napKemTen()) {
+        for (Object[] dong : dongVatTu) {
             VatTu v = (VatTu) dong[0];
             Map<String, Object> dto = VatTuDto.tao(v, (String) dong[1], (String) dong[2],
-                    (String) dong[3], (String) dong[4]);
+                    (String) dong[3], (String) dong[4],
+                    loNhap.getOrDefault(v.getId(), List.of()));
             theoId.put(v.getId(), dto);
             if (!v.getDaXoa()) danhSach.add(dto);
         }
         return new BoNhoDem.DuLieuVatTu(Collections.unmodifiableList(danhSach), Collections.unmodifiableMap(theoId));
+    }
+
+    /** Mọi đợt nhập (kèm tên nơi mua) gom theo vật tư, đợt cũ trước — MỘT truy vấn. */
+    private Map<Long, List<Map<String, Object>>> napLoNhapTheoVatTu() {
+        Map<Long, List<Map<String, Object>>> theoVatTu = new HashMap<>();
+        for (Object[] dong : loNhapRepo.napKemTenNcc()) {
+            LoNhap l = (LoNhap) dong[0];
+            theoVatTu.computeIfAbsent(l.getVatTuId(), k -> new ArrayList<>())
+                    .add(VatTuDto.dongLoNhap(l, (String) dong[1]));
+        }
+        theoVatTu.replaceAll((k, ds) -> Collections.unmodifiableList(ds));
+        return theoVatTu;
     }
 
     public BoNhoDem.DuLieuBang<MauSac> napMauSac() {

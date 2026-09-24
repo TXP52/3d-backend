@@ -413,6 +413,8 @@ public class DonHangService {
         don.setDiaChi(yeuCau.diaChi() == null ? "" : yeuCau.diaChi().trim());
         don.setGhiChu(yeuCau.ghiChu());
         don.setKenh(kenhHopLe(yeuCau.kenh()));
+        don.setPhuThu(khoanTien(yeuCau.phuThu(), "Khoản cộng thêm"));
+        don.setPhi(khoanTien(yeuCau.phi(), "Phí"));
         if (yeuCau.trangThai() != null && !yeuCau.trangThai().isBlank()) {
             if (!DonHang.TRANG_THAI_HOP_LE.contains(yeuCau.trangThai())) throw trangThaiSai();
             don.setTrangThai(yeuCau.trangThai());
@@ -422,8 +424,21 @@ public class DonHangService {
                 boNho.khuyenMai().danhSach(), yeuCau.maKhuyenMai(),
                 new KhuyenMaiService.NguoiDat(yeuCau.nguoiDungId(), don.getSoDienThoai(), don.getDiaChi()),
                 Kieu.DON_TAY);
-        ganThanhToan(don, yeuCau.thanhToan(), bangGia.tongCong());
+        // Khách trả / shop thực nhận = tiền hàng sau giảm + cộng thêm - phí
+        ganThanhToan(don, yeuCau.thanhToan(), tongSauPhi(don, bangGia));
         return luuDon(don, bangGia);
+    }
+
+    /** Tổng của đơn sau khi cộng khoản "Khác" và trừ phí; không cho âm. */
+    private static long tongSauPhi(DonHang don, BangGia bangGia) {
+        return Math.max(0, bangGia.tongCong() + don.getPhuThu() - don.getPhi());
+    }
+
+    /** Số tiền chủ shop gõ ở dòng phụ thu / phí: để trống = 0, âm thì báo lỗi ngay. */
+    private static long khoanTien(Long v, String ten) {
+        if (v == null) return 0;
+        if (v < 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ten + " không được là số âm.");
+        return v;
     }
 
     /** Thanh toán của đơn gõ tay: chủ shop chọn cách trả và đã thu tiền hay chưa. */
@@ -468,11 +483,13 @@ public class DonHangService {
             don.setTienGiam(bangGia.khuyenMai().tienGiam());
             idKhuyenMai = bangGia.khuyenMai().khuyenMai().getId();
         }
-        don.setTongTien(bangGia.tongCong());
+        // Đơn web không có hai khoản này (đều 0) nên tổng vẫn đúng bằng tiền hàng sau giảm
+        long tongCuoi = tongSauPhi(don, bangGia);
+        don.setTongTien(tongCuoi);
         if (don.getThanhToan().isEmpty()) {
             ThanhToan tt = new ThanhToan();
             tt.setPhuongThuc("cod");
-            tt.setSoTien(bangGia.tongCong());
+            tt.setSoTien(tongCuoi);
             don.themThanhToan(tt);
         }
 

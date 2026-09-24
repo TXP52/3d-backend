@@ -229,16 +229,17 @@ public class TongHopQuanTri {
         // Số điện thoại (đã chuẩn hoá) -> các dòng khách trong bảng mang số đó. Bỏ tài khoản
         // quản trị: đơn chủ shop tự đặt thử bằng số của mình không phải khách mua
         Map<String, List<Map<String, Object>>> theoSdt = new HashMap<>();
-        int coMatKhau = 0;
+        int coMatKhau = 0, soTaiKhoanKhach = 0;
         for (NguoiDung u : boNho.dsNguoiDung()) {
+            boolean laAdmin = "admin".equals(u.getVaiTro());
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("khoa", "nd-" + u.getId());
             m.put("nguoiDungId", u.getId());
             m.put("ten", u.getHoTen());
             m.put("email", u.getEmail());
             m.put("soDienThoai", trongThanhNull(u.getSoDienThoai()));
-            m.put("nhom", "admin".equals(u.getVaiTro()) ? "quan_tri" : "khach_hang");
-            m.put("nhomTen", "admin".equals(u.getVaiTro()) ? "Quản trị" : "Khách hàng");
+            m.put("nhom", laAdmin ? "quan_tri" : "khach_hang");
+            m.put("nhomTen", laAdmin ? "Quản trị" : "Khách hàng");
             m.put("soDon", 0);
             m.put("tongChi", 0L);
             m.put("donDauTien", null);
@@ -249,10 +250,14 @@ public class TongHopQuanTri {
             m.put("laTaiKhoan", true);
             boolean matKhau = trongThanhNull(u.getMatKhauHash()) != null;
             m.put("coMatKhau", matKhau);
-            if (matKhau) coMatKhau++;
+            // Tài khoản quản trị không đếm vào KPI: chủ shop không phải khách của chính mình
+            if (!laAdmin) {
+                soTaiKhoanKhach++;
+                if (matKhau) coMatKhau++;
+            }
             theoTaiKhoan.put(u.getId(), m);
             String sdt = chuanSoDienThoai(u.getSoDienThoai());
-            if (sdt != null && !"admin".equals(u.getVaiTro())) {
+            if (sdt != null && !laAdmin) {
                 theoSdt.computeIfAbsent(sdt, k -> new ArrayList<>()).add(m);
             }
         }
@@ -305,7 +310,12 @@ public class TongHopQuanTri {
             }
         }
 
-        List<Map<String, Object>> khach = new ArrayList<>(theoTaiKhoan.values());
+        // Tài khoản quản trị vẫn nằm trong theoTaiKhoan để đơn của chính chủ shop gắn vào đó,
+        // nhưng KHÔNG ra bảng khách hàng (và tiền của mấy đơn đó không tính vào tổng chi tiêu)
+        List<Map<String, Object>> khach = new ArrayList<>();
+        for (Map<String, Object> m : theoTaiKhoan.values()) {
+            if (!"quan_tri".equals(m.get("nhom"))) khach.add(m);
+        }
         khach.addAll(vangLai.values());
         long tongChi = 0;
         for (Map<String, Object> m : khach) tongChi += (Long) m.get("tongChi");
@@ -314,7 +324,7 @@ public class TongHopQuanTri {
         kpi.put("tongKhach", khach.size());
         // Tài khoản khách TỰ đăng ký (có mật khẩu) tách khỏi khách chủ shop nhập tay vào danh bạ
         kpi.put("daDangKy", coMatKhau);
-        kpi.put("danhBa", theoTaiKhoan.size() - coMatKhau);
+        kpi.put("danhBa", soTaiKhoanKhach - coMatKhau);
         kpi.put("vangLai", vangLai.size());
         kpi.put("tongChiTieu", tongChi);
 

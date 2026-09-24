@@ -25,7 +25,7 @@ public record DonTayRequest(
         @NotBlank(message = "Vui lòng nhập số điện thoại")
         String soDienThoai,
 
-        /** Để trống được: khách mua tại shop cầm hàng về luôn thì không có địa chỉ giao. */
+        @NotBlank(message = "Vui lòng nhập địa chỉ")
         String diaChi,
 
         String ghiChu,
@@ -33,8 +33,14 @@ public record DonTayRequest(
         /** Nối đơn vào một khách trong danh bạ (bảng nguoi_dung), để trống = khách lẻ. */
         Long nguoiDungId,
 
-        /** website | facebook | zalo | tai_shop | khac — để trống thì tính là website. */
+        /** facebook | zalo | shopee | tiktok | threads | website | tai_shop | khac — trống = website. */
         String kenh,
+
+        /** Cộng thêm vào đơn ngoài tiền hàng (ship khách trả, gói quà...); để trống = 0. */
+        Long phuThu,
+
+        /** Trừ khỏi tổng: phí sàn, phí ship shop chịu...; để trống = 0. */
+        Long phi,
 
         /** Trạng thái ban đầu, để trống = cho_xac_nhan. Tạo thẳng đơn da_huy thì KHÔNG trừ kho. */
         String trangThai,

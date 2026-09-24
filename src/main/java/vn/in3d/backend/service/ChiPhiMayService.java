@@ -189,7 +189,8 @@ public class ChiPhiMayService {
             long sl = so(v.get("soLuong"));
             if (sl <= 0) continue;
             soMay += sl;
-            tongGia += (double) so(v.get("gia")) * sl;
+            // tongTienMua đã cộng đủ các đợt nhập (mỗi đợt một giá); gia chỉ là bình quân đã làm tròn
+            tongGia += so(v.get("tongTienMua"));
         }
         double giaTrungBinh = soMay == 0 ? 0 : tongGia / soMay;
         Map<String, String> cd = caiDat == null ? Map.of() : caiDat;

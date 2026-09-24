@@ -10,6 +10,7 @@ import vn.in3d.backend.repository.NhaCungCapRepository;
 import vn.in3d.backend.repository.VatTuRepository;
 import vn.in3d.backend.service.BoNhoDem;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -68,10 +69,22 @@ public class VatTuController {
         return boNho.dsVatTu();
     }
 
-    /** Thêm vật tư. Trả dòng danh sách (kèm tên màu / nhà cung cấp / loại). */
+    /**
+     * Thêm vật tư. Trả dòng danh sách (kèm tên màu / nhà cung cấp / loại).
+     *
+     * Form gửi kèm "loNhap" (mảng các đợt nhập) thì số lượng / giá / tổng tiền của vật tư
+     * cộng từ các đợt đó; không gửi thì ô gia + soLuong thành ĐỢT NHẬP ĐẦU TIÊN, nhờ vậy
+     * chỗ nào còn gọi kiểu cũ vẫn tạo ra dữ liệu đầy đủ.
+     */
     @PostMapping("/vat-tu")
     @ResponseStatus(HttpStatus.CREATED)
-    public Map<String, Object> them(@RequestBody VatTu vt) {
+    public Map<String, Object> them(@RequestBody Map<String, Object> td) {
+        VatTu vt = docVatTuMoi(td);
+        List<DotNhap> guiLen = docLoNhap(td);
+        // Không gửi đợt nào: ô giá + số lượng của form cũ chính là đợt nhập đầu tiên
+        List<DotNhap> dot = guiLen != null ? guiLen
+                : List.of(new DotNhap(ngayNhapCua(vt), soDuong(vt.getSoLuong()),
+                        vt.getGia() == null ? 0 : vt.getGia(), vt.getNhaCungCapId()));
         Long id = giaoDich.execute(gd -> {
             vt.setId(null);
             vt.setTrangThai(chuanHoaTrangThai(vt.getTrangThai()));
@@ -82,17 +95,22 @@ public class VatTuController {
                 throw new org.springframework.web.server.ResponseStatusException(
                         HttpStatus.BAD_REQUEST, "Màu không tồn tại trong bảng màu.");
             }
-            return vatTuRepo.save(vt).getId();
+            congTuLoNhap(vt, dot);
+            Long moi = vatTuRepo.save(vt).getId();
+            ghiLoNhap(moi, dot);
+            return moi;
         });
         return traDongVatTu(id, vt);
     }
 
     /**
-     * Cập nhật: gia, soLuong, daDungGram, khoiLuongGram, mauSacId, ten, trangThai, hinhAnh, nhaCungCapId, ghiChu.
+     * Cập nhật: gia, soLuong, daDungGram, khoiLuongGram, mauSacId, ten, trangThai, hinhAnh,
+     * nhaCungCapId, ghiChu và loNhap (TOÀN BỘ danh sách đợt nhập sau khi sửa).
      * Form kho luôn gửi lại mauSacId + danhMucId: chỉ hỏi database khi giá trị THẬT SỰ đổi.
      */
     @PutMapping("/vat-tu/{id}")
     public Map<String, Object> capNhat(@PathVariable Long id, @RequestBody Map<String, Object> td) {
+        List<DotNhap> dot = docLoNhap(td);     // null = không gửi phần đợt nhập -> để yên
         // Bản chụp danh mục lấy TRƯỚC khi mở transaction. Đọc bộ nhớ đệm ở trong
         // transaction thì lúc khoá DM vừa bị xoá, luồng nạp phải xin kết nối THỨ HAI
         // trong khi luồng request đang giữ một kết nối — pool đầy là treo rồi lỗi,
@@ -115,8 +133,22 @@ public class VatTuController {
                 kiemTraTrangThai(tt);
                 if (tt != null) vt.setTrangThai(tt);
             }
-            if (td.containsKey("gia")) vt.setGia(so(td.get("gia")));
-            if (td.containsKey("soLuong")) vt.setSoLuong(so(td.get("soLuong")).intValue());
+            // Có gửi các đợt nhập thì giá / số lượng / tổng tiền cộng từ chúng, hai ô rời
+            // gửi kèm (nếu có) bị bỏ qua — nếu không hai nguồn số sẽ đá nhau
+            if (dot != null) {
+                congTuLoNhap(vt, dot);
+                ghiLoNhap(id, dot);
+            } else {
+                if (td.containsKey("gia")) vt.setGia(so(td.get("gia")));
+                if (td.containsKey("soLuong")) vt.setSoLuong(so(td.get("soLuong")).intValue());
+                if (td.containsKey("gia") || td.containsKey("soLuong")) {
+                    // Sửa kiểu cũ (một giá, một số lượng): đợt nhập duy nhất đi theo cho khớp
+                    vt.setTienMua((vt.getGia() == null ? 0 : vt.getGia())
+                            * (vt.getSoLuong() == null ? 0 : vt.getSoLuong()));
+                    ghiLoNhap(id, List.of(new DotNhap(ngayNhapCua(vt), soDuong(vt.getSoLuong()),
+                            vt.getGia() == null ? 0 : vt.getGia(), vt.getNhaCungCapId())));
+                }
+            }
             if (td.containsKey("khoiLuongGram")) vt.setKhoiLuongGram(so(td.get("khoiLuongGram")).intValue());
             if (td.containsKey("daDungGram")) vt.setDaDungGram(Math.max(0, so(td.get("daDungGram")).intValue()));
             if (td.containsKey("mauSacId")) {
@@ -151,6 +183,115 @@ public class VatTuController {
             return vt;
         });
         return traDongVatTu(id, daSua);
+    }
+
+    /* ---------------- Đợt nhập hàng ----------------
+       Một vật tư mua nhiều lần, mỗi lần một giá: mỗi lần là một dòng lo_nhap.
+       Vật tư giữ ba số cộng từ các đợt — soLuong (tổng), tienMua (tổng tiền, chính xác)
+       và gia (đơn giá BÌNH QUÂN, làm tròn, chỉ để hiện) — nên mọi chỗ tính vốn đang đọc
+       vat_tu chạy y như trước khi có bảng này. */
+
+    /** Một đợt nhập form gửi lên (chưa có id: ghi là xoá hết rồi chép lại cả danh sách). */
+    private record DotNhap(LocalDate ngayNhap, int soLuong, long gia, Long nhaCungCapId) {}
+
+    /**
+     * Đọc mảng "loNhap" của form: null = không gửi (PUT thì để yên các đợt đang có).
+     * Mỗi đợt cần số lượng ≥ 1 và đơn giá ≥ 0; ngày để trống thì tính là hôm nay.
+     */
+    private List<DotNhap> docLoNhap(Map<String, Object> td) {
+        if (!td.containsKey("loNhap")) return null;
+        if (!(td.get("loNhap") instanceof List<?> tho)) return List.of();
+        List<DotNhap> ra = new java.util.ArrayList<>();
+        for (Object o : tho) {
+            if (!(o instanceof Map<?, ?> m)) continue;
+            int sl = (int) soCoDau(m.get("soLuong"));
+            long gia = soCoDau(m.get("gia"));
+            if (sl < 1) throw loiXau("Số lượng của mỗi đợt nhập phải từ 1 trở lên.");
+            if (gia < 0) throw loiXau("Đơn giá của đợt nhập không được là số âm.");
+            ra.add(new DotNhap(ngay(m.get("ngayNhap")), sl, gia, idHoacNull(m.get("nhaCungCapId"))));
+        }
+        if (ra.isEmpty()) throw loiXau("Vật tư phải có ít nhất một đợt nhập.");
+        return List.copyOf(ra);
+    }
+
+    /** Cộng các đợt vào vật tư: tổng số lượng, tổng tiền và đơn giá bình quân (làm tròn). */
+    private static void congTuLoNhap(VatTu vt, List<DotNhap> dot) {
+        long sl = 0, tien = 0;
+        for (DotNhap d : dot) {
+            sl += d.soLuong();
+            tien += d.gia() * d.soLuong();
+        }
+        vt.setSoLuong((int) sl);
+        vt.setTienMua(tien);
+        vt.setGia(sl > 0 ? Math.round((double) tien / sl) : 0L);
+    }
+
+    /**
+     * Ghi lại TOÀN BỘ các đợt nhập của một vật tư: xoá hết rồi chép lại danh sách mới
+     * (hai lệnh, mỗi lệnh một lượt đi-về — sửa từng dòng thì mỗi dòng một lượt).
+     * Đợt nhập không được nơi nào trỏ tới nên đánh số lại không ảnh hưởng gì.
+     */
+    private void ghiLoNhap(Long vatTuId, List<DotNhap> dot) {
+        jdbc.update("delete from lo_nhap where vat_tu_id = ?", vatTuId);
+        if (dot.isEmpty()) return;
+        List<Object[]> thamSo = new java.util.ArrayList<>();
+        for (DotNhap d : dot) {
+            thamSo.add(new Object[]{vatTuId, java.sql.Date.valueOf(d.ngayNhap()),
+                    d.soLuong(), d.gia(), d.nhaCungCapId()});
+        }
+        jdbc.batchUpdate("insert into lo_nhap (vat_tu_id, ngay_nhap, so_luong, gia, nha_cung_cap_id) "
+                + "values (?, ?, ?, ?, ?)", thamSo);
+    }
+
+    /** Ngày nhập của đợt duy nhất khi form cũ chỉ gửi giá + số lượng: ngày tạo vật tư, không có thì hôm nay. */
+    private static LocalDate ngayNhapCua(VatTu vt) {
+        return vt.getCreatedAt() == null ? LocalDate.now() : vt.getCreatedAt().toLocalDate();
+    }
+
+    private static int soDuong(Integer v) { return v == null || v < 1 ? 1 : v; }
+
+    private static LocalDate ngay(Object v) {
+        String s = v == null ? "" : String.valueOf(v).trim();
+        if (s.isEmpty()) return LocalDate.now();
+        try {
+            return LocalDate.parse(s.length() > 10 ? s.substring(0, 10) : s);
+        } catch (RuntimeException sai) {
+            throw loiXau("Ngày nhập không hợp lệ (cần dạng 2026-09-24).");
+        }
+    }
+
+    /** Số nguyên có thể âm (để bắt lỗi "đơn giá âm"); không phải số thì coi là 0. */
+    private static long soCoDau(Object v) {
+        try { return Long.parseLong(String.valueOf(v).trim()); } catch (Exception e) { return 0L; }
+    }
+
+    private Long idHoacNull(Object v) {
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        if (s.isEmpty() || "null".equals(s)) return null;
+        try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; }
+    }
+
+    private static org.springframework.web.server.ResponseStatusException loiXau(String chu) {
+        return new org.springframework.web.server.ResponseStatusException(HttpStatus.BAD_REQUEST, chu);
+    }
+
+    /** Vật tư mới dựng từ JSON của form (trước đây Spring tự đổ vào entity). */
+    private VatTu docVatTuMoi(Map<String, Object> td) {
+        VatTu vt = new VatTu();
+        if (td.get("ten") != null) vt.setTen(String.valueOf(td.get("ten")).trim());
+        if (td.get("loai") != null) vt.setLoai(String.valueOf(td.get("loai")));
+        vt.setMauSacId(idHoacNull(td.get("mauSacId")));
+        vt.setDanhMucId(idHoacNull(td.get("danhMucId")));
+        vt.setNhaCungCapId(idHoacNull(td.get("nhaCungCapId")));
+        if (td.containsKey("gia")) vt.setGia(so(td.get("gia")));
+        if (td.containsKey("soLuong")) vt.setSoLuong(so(td.get("soLuong")).intValue());
+        if (td.containsKey("khoiLuongGram")) vt.setKhoiLuongGram(so(td.get("khoiLuongGram")).intValue());
+        if (td.containsKey("daDungGram")) vt.setDaDungGram(Math.max(0, so(td.get("daDungGram")).intValue()));
+        if (td.get("trangThai") != null) vt.setTrangThai(String.valueOf(td.get("trangThai")));
+        if (td.get("hinhAnh") != null) vt.setHinhAnh(String.valueOf(td.get("hinhAnh")));
+        if (td.get("ghiChu") != null) vt.setGhiChu(String.valueOf(td.get("ghiChu")));
+        return vt;
     }
 
     /** Ghi nhận vừa in hết thêm N gram nhựa (cộng dồn vào daDungGram) — MỘT lệnh UPDATE. */
