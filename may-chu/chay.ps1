@@ -46,7 +46,43 @@ function TimJava {
     return 'java'   # đành dùng bản trong PATH
 }
 
+# Hỏi thẳng java.exe xem nó là bản mấy. Không tin theo tên thư mục: máy có thể
+# cài nhiều bản, mà bản trong PATH thường là bản mới nhất — đúng cái không dùng được.
+function SoHieuJava($duong) {
+    try {
+        $dong = (& $duong -version 2>&1 | Out-String)
+        if ($dong -match 'version "(\d+)') { return [int]$Matches[1] }
+    } catch { }
+    return 0
+}
+
 $java = TimJava
+$ban  = SoHieuJava $java
+
+# Java 8 tu khai la "1.8.0_xxx" nen doc ra so 1, khong doc duoc thi la 0 —
+# ca hai deu nho hon 17 nen dieu kien nay bat het.
+if ($ban -lt 17 -or $ban -gt 22) {
+    Write-Host ""
+    Write-Host "Java dang dung KHONG chay duoc backend nay." -ForegroundColor Red
+    Write-Host "  Duong dan : $java"
+    Write-Host "  Ban       : $(if ($ban -eq 0) { 'khong doc duoc' } else { $ban })"
+    Write-Host "  Can       : Java 17 den 22 (Spring Boot 3.3.4 chua chay duoc ban moi hon)."
+    Write-Host ""
+    Write-Host "Cac ban java tim thay tren may:" -ForegroundColor Cyan
+    @("$env:ProgramFiles\Eclipse Adoptium", "$env:ProgramFiles\Java",
+      "$env:ProgramFiles\Microsoft", "$env:ProgramFiles\Amazon Corretto",
+      "${env:ProgramFiles(x86)}\Java") |
+        Where-Object { Test-Path $_ } |
+        ForEach-Object { Get-ChildItem $_ -Directory -ErrorAction SilentlyContinue } |
+        ForEach-Object { Join-Path $_.FullName 'bin\java.exe' } |
+        Where-Object { Test-Path $_ } |
+        ForEach-Object { Write-Host "  $_  (ban $(SoHieuJava $_))" }
+    Write-Host ""
+    Write-Host "Chon mot ban 17-22 o tren roi khai truoc khi chay:" -ForegroundColor Yellow
+    Write-Host '  [Environment]::SetEnvironmentVariable("IN3D_JAVA", "<duong dan java.exe>", "Machine")'
+    Write-Host "  (mo PowerShell moi thi bien nay moi co hieu luc)"
+    exit 1
+}
 
 if (-not (Test-Path $jar)) {
     Write-Host "Chua co file jar. Chay lenh nay truoc:" -ForegroundColor Yellow
@@ -59,7 +95,7 @@ if ((Test-Path $nhatKy) -and ((Get-Item $nhatKy).Length -gt 20MB)) {
     Move-Item $nhatKy "$nhatKy.cu" -Force
 }
 
-"=== Khoi dong $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss') — java: $java ===" | Out-File $nhatKy -Append -Encoding utf8
+"=== Khoi dong $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss') — java $ban: $java ===" | Out-File $nhatKy -Append -Encoding utf8
 
 # Chạy thẳng (không Start-Process): Task Scheduler coi tiến trình này là tác vụ,
 # tắt tác vụ là tắt backend, khỏi phải đi tìm số hiệu tiến trình.
