@@ -1,0 +1,9 @@
+# Những thứ không cần gửi sang Docker khi dựng ảnh — gửi ít thì dựng nhanh,
+# và tránh lỡ tay đưa mật khẩu vào trong ảnh.
+target/
+data/
+*.log
+.idea/
+.vscode/
+.git/
+src/main/resources/application-supabase.properties

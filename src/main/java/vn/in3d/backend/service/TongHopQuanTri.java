@@ -339,7 +339,8 @@ public class TongHopQuanTri {
        ============================================================ */
 
     /** Chi phí tính từ kho — cùng công thức Apex.tinhChiPhi cũ. */
-    public record ChiPhi(long tienMuaVatTu, long tienMayIn, long tienNhuaTong, long tienNhuaDaDung,
+    public record ChiPhi(long tienMuaVatTu, long tienMayIn, long tienNhuaTong, long tienDungCu,
+                         long tienNhuaDaDung,
                          long tongChiPhi, long tongGramDaDung, long tongGramMua, long gramConLai,
                          double giaNhuaTrungBinhMoiGram) {
         public Map<String, Object> thanhMap() {
@@ -347,6 +348,8 @@ public class TongHopQuanTri {
             m.put("tienMuaVatTu", tienMuaVatTu);
             m.put("tienMayIn", tienMayIn);
             m.put("tienNhuaTong", tienNhuaTong);
+            // Mọi thứ trong kho không phải máy in / nhựa: dụng cụ, móc khoá, lõi, keo...
+            m.put("tienDungCu", tienDungCu);
             m.put("tienNhuaDaDung", tienNhuaDaDung);
             m.put("tongChiPhi", tongChiPhi);
             m.put("tongGramDaDung", tongGramDaDung);
@@ -363,7 +366,8 @@ public class TongHopQuanTri {
      * khác nhau (tổng tiền không khớp với mấy dòng in ngay bên cạnh).
      */
     public ChiPhi chiPhi(List<Map<String, Object>> dsVatTu) {
-        long tienMua = 0, tienMayIn = 0, tienNhuaTong = 0, tienNhuaDaDung = 0, gramDaDung = 0, gramMua = 0;
+        long tienMua = 0, tienMayIn = 0, tienNhuaTong = 0, tienDungCu = 0;
+        long tienNhuaDaDung = 0, gramDaDung = 0, gramMua = 0;
         for (Map<String, Object> v : dsVatTu) {
             long tongTienMua = so(v.get("tongTienMua"));
             tienMua += tongTienMua;
@@ -374,9 +378,12 @@ public class TongHopQuanTri {
                 tienNhuaTong += tongTienMua;
             } else if ("may_in".equals(v.get("loai"))) {
                 tienMayIn += tongTienMua;
+            } else {
+                tienDungCu += tongTienMua;
             }
         }
-        return new ChiPhi(tienMua, tienMayIn, tienNhuaTong, tienNhuaDaDung, tienMua + tienNhuaDaDung,
+        return new ChiPhi(tienMua, tienMayIn, tienNhuaTong, tienDungCu, tienNhuaDaDung,
+                tienMua + tienNhuaDaDung,
                 gramDaDung, gramMua, Math.max(0, gramMua - gramDaDung),
                 gramMua > 0 ? (double) tienNhuaTong / gramMua : 0);
     }
@@ -399,6 +406,7 @@ public class TongHopQuanTri {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", v.get("id"));
             m.put("ten", v.get("ten"));
+            m.put("hinhAnh", v.get("hinhAnh"));       // ảnh cuộn nhựa, để bảng hiện đúng ảnh trong kho
             m.put("mau", v.get("mau"));
             m.put("maMau", v.get("maMau"));
             m.put("donGiaMoiGram", v.get("donGiaMoiGram"));
@@ -417,6 +425,8 @@ public class TongHopQuanTri {
         ra.put("laiLo", doanhThu - cp.tongChiPhi());
         ra.put("tiLeLai", tiLeLai);
         gg.ghiVao(ra);
+        // Giá dự kiến của các sản phẩm ĐANG BÁN — trang Quản lý vốn khỏi phải gõ tay mẫu
+        ra.put("giaSanPham", giaSanPhamDangBan(cp, gg, tiLeLai));
         ra.put("cuonNhua", cuon);
         return ra;
     }
@@ -484,25 +494,9 @@ public class TongHopQuanTri {
         List<Map<String, Object>> ds = new ArrayList<>();
         for (Object o : mauIn == null ? List.of() : mauIn) {
             if (!(o instanceof Map<?, ?> mau)) continue;
-            long gram = so(mau.get("gram"));
-            Long phutGui = phutDuong(mau.get("phut"));
-            long phut = phutGui != null ? phutGui : Math.max(0, Math.round(gram / gramMoiGio * 60));
-            long tienNhua = Math.round(gram * cp.giaNhuaTrungBinhMoiGram());
-            // Nhân bằng số thực: phút (ước theo gram) rất lớn nhân kiểu long là tràn số, ra tiền âm
-            long tienMay = Math.round(phut * (double) tienMayMoiGio / 60.0);
-            long giaVon = tienNhua + tienMay;
-            long giaBan = Math.round(giaVon * heSoLai(tiLeLai) / 500) * 500;
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("ten", mau.get("ten") == null ? "" : String.valueOf(mau.get("ten")));
-            m.put("gram", gram);
-            m.put("phut", phut);
-            m.put("phutUocTinh", phutGui == null);
-            m.put("tienNhua", tienNhua);
-            m.put("tienMay", tienMay);
-            m.put("giaVon", giaVon);
-            m.put("giaBan", giaBan);
-            m.put("lai", giaBan - giaVon);
-            ds.add(m);
+            ds.add(dongGiaMau(mau.get("ten") == null ? "" : String.valueOf(mau.get("ten")),
+                    so(mau.get("gram")), phutDuong(mau.get("phut")),
+                    cp, tienMayMoiGio, gramMoiGio, tiLeLai));
         }
 
         Map<String, Object> ra = new LinkedHashMap<>();
@@ -510,6 +504,70 @@ public class TongHopQuanTri {
         gg.ghiVao(ra);
         ra.put("mauIn", ds);
         return ra;
+    }
+
+    /**
+     * Một dòng giá dự kiến — dùng chung cho mẫu chủ shop tự nhập và cho sản phẩm đang bán.
+     * @param phutGui phút in đã biết; null = ước theo gram (phutUocTinh = true)
+     */
+    private static Map<String, Object> dongGiaMau(String ten, long gram, Long phutGui, ChiPhi cp,
+                                                  long tienMayMoiGio, double gramMoiGio, double tiLeLai) {
+        long phut = phutGui != null ? phutGui : Math.max(0, Math.round(gram / gramMoiGio * 60));
+        long tienNhua = Math.round(gram * cp.giaNhuaTrungBinhMoiGram());
+        // Nhân bằng số thực: phút (ước theo gram) rất lớn nhân kiểu long là tràn số, ra tiền âm
+        long tienMay = Math.round(phut * (double) tienMayMoiGio / 60.0);
+        long giaVon = tienNhua + tienMay;
+        long giaBan = Math.round(giaVon * heSoLai(tiLeLai) / 500) * 500;
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("ten", ten);
+        m.put("gram", gram);
+        m.put("phut", phut);
+        m.put("phutUocTinh", phutGui == null);
+        m.put("tienNhua", tienNhua);
+        m.put("tienMay", tienMay);
+        m.put("giaVon", giaVon);
+        m.put("giaBan", giaBan);
+        m.put("lai", giaBan - giaVon);
+        return m;
+    }
+
+    /**
+     * Giá dự kiến của MỌI SẢN PHẨM ĐANG BÁN (loại "hàng bán", đang hiện trên web) — trang
+     * Quản lý vốn không phải gõ tay mẫu nữa.
+     *   gram = số gram nhựa cho MỘT cái (lấy mức cao nhất trong các dòng nhựa của sản phẩm)
+     *   phút = giờ in của biến thể mặc định; biến thể đó chưa khai thì lấy biến thể có giờ in
+     *          lớn nhất; cả sản phẩm chưa khai giờ nào thì ước theo gram
+     * Kèm giá đang niêm yết (giaDangBan) để so với giá đề xuất. Sản phẩm chưa khai gram nhựa
+     * thì bỏ qua: không có gì để tính.
+     */
+    private List<Map<String, Object>> giaSanPhamDangBan(ChiPhi cp, GiaGram gg, double tiLeLai) {
+        long tienMayMoiGio = gg.may().tongMoiGio();
+        double gramMoiGio = gg.nangSuat().gramMoiGio();
+        List<Map<String, Object>> ds = new ArrayList<>();
+        for (Map<String, Object> sp : boNho.dsSanPham(false)) {
+            if (!Boolean.TRUE.equals(sp.get("dangBan")) || !"ban".equals(sp.get("loaiSanPham"))) continue;
+            long gram = Math.max(so(sp.get("gramMoiCaiMax")), so(sp.get("gramMoiCaiMin")));
+            if (gram <= 0) continue;
+
+            Long phut = null;
+            long phutLonNhat = 0;
+            for (Object o : sp.get("bienThe") instanceof List<?> l ? l : List.of()) {
+                if (!(o instanceof Map<?, ?> bt)) continue;
+                long p = so(bt.get("thoiGianInPhut"));
+                if (p > 0 && Boolean.TRUE.equals(bt.get("macDinh"))) { phut = p; break; }
+                if (p > phutLonNhat) phutLonNhat = p;
+            }
+            if (phut == null && phutLonNhat > 0) phut = phutLonNhat;
+
+            Map<String, Object> m = new LinkedHashMap<>(
+                    dongGiaMau(String.valueOf(sp.get("ten")), gram, phut, cp, tienMayMoiGio, gramMoiGio, tiLeLai));
+            m.put("id", sp.get("id"));
+            m.put("maSanPham", sp.get("maSanPham"));
+            m.put("hinhAnh", sp.get("hinhAnh"));
+            m.put("giaDangBan", so(sp.get("gia")));
+            ds.add(m);
+        }
+        return ds;
     }
 
     /** 120 (%) -> 2.2 */

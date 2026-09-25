@@ -201,6 +201,24 @@ public class QuanTriController {
         return kq.don();
     }
 
+    /**
+     * SỬA đơn đã tạo: thông tin khách, kênh bán, khoản cộng thêm / phí, trạng thái,
+     * cách thanh toán và cả danh sách món (kho được trả lại rồi trừ lại cho khớp).
+     * Body giống hệt lúc tạo đơn. Trả đơn sau khi sửa, đúng dạng GET /api/don-hang.
+     */
+    @PutMapping("/don-hang/{id}")
+    public DonHang suaDonTay(@PathVariable Long id, @Valid @RequestBody DonTayRequest yeuCau,
+                             @RequestHeader(value = "Authorization", required = false) String authorization) {
+        batBuocAdmin(authorization, "Chỉ admin mới sửa được đơn hàng");
+        DonHangService.KetQuaTaoDon kq = donHangService.suaDonTay(id, yeuCau);
+        boNho.xoaVaNapLai(kq.doiKho()
+                ? new String[] {BoNhoDem.DH, BoNhoDem.KM, BoNhoDem.SP}
+                : new String[] {BoNhoDem.DH, BoNhoDem.KM});
+        DonHang sau = boNho.donHang().theoId().get(id);
+        if (sau == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy đơn hàng.");
+        return sau;
+    }
+
     /* ============================================================
        Danh bạ khách hàng (bảng nguoi_dung)
        ============================================================ */

@@ -441,6 +441,125 @@ public class DonHangService {
         return v;
     }
 
+    /**
+     * SỬA một đơn đã tạo (trang quản trị): thông tin khách, kênh bán, khoản cộng thêm / phí,
+     * trạng thái, cách thanh toán VÀ cả danh sách món.
+     *
+     * Giá đi đúng đường tính giá của lúc tạo đơn (tinhBangGia) nên tiền luôn khớp với
+     * bảng giá đang bán, không nhận số tiền trình duyệt gửi lên.
+     *
+     * Kho: trả lại toàn bộ món CŨ rồi trừ lại món MỚI trong cùng một lệnh — đơn đang huỷ
+     * (hoặc sửa sang huỷ) thì bên đó không tính, nên sửa món của đơn huỷ không đụng kho.
+     *
+     * Lượt dùng mã khuyến mãi: đổi sang mã khác thì trả lượt cho mã cũ và ghi nhận cho mã mới.
+     */
+    public KetQuaTaoDon suaDonTay(Long id, DonTayRequest yeuCau) {
+        Long nguoiDungId = kiemTraKhach(yeuCau.nguoiDungId());
+        String tenKhach = yeuCau.tenKhach().trim();
+        String soDienThoai = yeuCau.soDienThoai().trim();
+        String diaChi = yeuCau.diaChi() == null ? "" : yeuCau.diaChi().trim();
+        String kenh = kenhHopLe(yeuCau.kenh());
+        long phuThu = khoanTien(yeuCau.phuThu(), "Khoản cộng thêm");
+        long phi = khoanTien(yeuCau.phi(), "Phí");
+        String trangThaiGui = yeuCau.trangThai() == null || yeuCau.trangThai().isBlank()
+                ? null : yeuCau.trangThai();
+        if (trangThaiGui != null && !DonHang.TRANG_THAI_HOP_LE.contains(trangThaiGui)) throw trangThaiSai();
+
+        BangGia bangGia = tinhBangGia(yeuCau.matHang(), traTuBoNhoDem(boNho.sanPham()),
+                boNho.khuyenMai().danhSach(), yeuCau.maKhuyenMai(),
+                new KhuyenMaiService.NguoiDat(yeuCau.nguoiDungId(), soDienThoai, diaChi),
+                Kieu.DON_TAY);
+        long tongCuoi = Math.max(0, bangGia.tongCong() + phuThu - phi);
+
+        Map<Long, Integer> kho = new LinkedHashMap<>();
+        giaoDich.executeWithoutResult(gd -> {
+            List<Map<String, Object>> dong = jdbc.queryForList(
+                    "select trang_thai, is_deleted, ma_khuyen_mai from don_hang where id = ? for update", id);
+            if (dong.isEmpty()) throw khongThayDon(id);
+            String ttCu = (String) dong.get(0).get("trang_thai");
+            boolean daXoa = Boolean.TRUE.equals(dong.get(0).get("is_deleted"));
+            String maCu = (String) dong.get(0).get("ma_khuyen_mai");
+            String ttMoi = trangThaiGui == null ? ttCu : trangThaiGui;
+
+            // Kho: + trả lại món cũ (nếu đơn đang giữ hàng), - trừ món mới (nếu đơn vẫn giữ hàng)
+            if (!daXoa && !DonHang.DA_HUY.equals(ttCu)) {
+                for (Map<String, Object> ct : jdbc.queryForList(
+                        "select bien_the_id, so_luong from don_hang_chi_tiet "
+                        + "where don_hang_id = ? and bien_the_id is not null", id)) {
+                    kho.merge(((Number) ct.get("bien_the_id")).longValue(),
+                            ((Number) ct.get("so_luong")).intValue(), Integer::sum);
+                }
+            }
+            if (!daXoa && !DonHang.DA_HUY.equals(ttMoi)) {
+                for (DongGia d : bangGia.dong()) {
+                    if (d.bienTheId() != null) kho.merge(d.bienTheId(), -d.soLuong(), Integer::sum);
+                }
+            }
+            kho.values().removeIf(v -> v == 0);
+
+            // Món: xoá hết rồi chép lại danh sách mới (hai lệnh, không phải mỗi dòng một lượt)
+            jdbc.update("delete from don_hang_chi_tiet where don_hang_id = ?", id);
+            List<Object[]> thamSo = new ArrayList<>();
+            for (DongGia d : bangGia.dong()) {
+                thamSo.add(new Object[]{id, d.sanPhamId(), d.bienTheId(), d.ten(), d.tenBienThe(),
+                        d.donGia(), d.giaGoc(), d.soLuong()});
+            }
+            if (!thamSo.isEmpty()) {
+                jdbc.batchUpdate("insert into don_hang_chi_tiet (don_hang_id, san_pham_id, bien_the_id, "
+                        + "ten_san_pham, ten_bien_the, don_gia, don_gia_goc, so_luong, created_at, updated_at) "
+                        + "values (?, ?, ?, ?, ?, ?, ?, ?, now(), now())", thamSo);
+            }
+
+            String maMoi = bangGia.khuyenMai() == null ? null : bangGia.khuyenMai().khuyenMai().getMa();
+            jdbc.update("update don_hang set nguoi_dung_id = ?, ten_khach = ?, so_dien_thoai = ?, "
+                    + "dia_chi = ?, ghi_chu = ?, kenh = ?, phu_thu = ?, phi = ?, trang_thai = ?, "
+                    + "ma_khuyen_mai = ?, tien_giam = ?, tien_giam_san_pham = ?, tong_tien = ?, "
+                    + "updated_at = now() where id = ?",
+                    nguoiDungId, tenKhach, soDienThoai, diaChi, yeuCau.ghiChu(), kenh, phuThu, phi,
+                    ttMoi, maMoi,
+                    bangGia.khuyenMai() == null ? 0L : bangGia.khuyenMai().tienGiam(),
+                    bangGia.tienGiamSanPham(), tongCuoi, id);
+
+            ghiThanhToan(id, yeuCau.thanhToan(), tongCuoi);
+
+            // Lượt dùng mã: chỉ đụng khi mã của đơn thật sự đổi
+            if (!java.util.Objects.equals(chuanMa(maCu), chuanMa(maMoi))) {
+                if (maCu != null && !maCu.isBlank()) khuyenMaiService.traLaiLuotTheoMa(maCu);
+                if (bangGia.khuyenMai() != null) {
+                    khuyenMaiService.ghiNhanDaDung(bangGia.khuyenMai().khuyenMai().getId());
+                }
+            }
+            doiKho(kho);
+        });
+        if (!kho.isEmpty()) dongBoTonKhoSanPham(kho.keySet());
+        return new KetQuaTaoDon(null, !kho.isEmpty());
+    }
+
+    private static String chuanMa(String ma) {
+        return ma == null || ma.isBlank() ? null : ma.trim().toUpperCase(java.util.Locale.ROOT);
+    }
+
+    /**
+     * Ghi lại bản ghi thanh toán của đơn đang sửa: giữ đúng MỘT dòng, đúng số tiền mới.
+     * Đơn cũ chưa có dòng nào (dữ liệu sửa tay trên database) thì thêm mới.
+     */
+    private void ghiThanhToan(Long donHangId, DonTayRequest.ThanhToanTay tt, long soTien) {
+        String phuongThuc = phuongThucHopLe(tt == null ? null : tt.phuongThuc());
+        boolean daTra = tt != null && Boolean.TRUE.equals(tt.daThanhToan());
+        // "chua_thanh_toan" là đúng tên trạng thái mặc định của bảng thanh_toan
+        String trangThai = daTra ? "da_thanh_toan" : "chua_thanh_toan";
+        int soDong = jdbc.update("update thanh_toan set phuong_thuc = ?, so_tien = ?, trang_thai = ?, "
+                + "thanh_toan_luc = case when ? then coalesce(thanh_toan_luc, now()) else null end, "
+                + "updated_at = now() where don_hang_id = ?",
+                phuongThuc, soTien, trangThai, daTra, donHangId);
+        if (soDong == 0) {
+            jdbc.update("insert into thanh_toan (don_hang_id, phuong_thuc, so_tien, trang_thai, "
+                    + "thanh_toan_luc, created_at, updated_at) values (?, ?, ?, ?, ?, now(), now())",
+                    donHangId, phuongThuc, soTien, trangThai,
+                    daTra ? java.sql.Timestamp.from(java.time.Instant.now()) : null);
+        }
+    }
+
     /** Thanh toán của đơn gõ tay: chủ shop chọn cách trả và đã thu tiền hay chưa. */
     private void ganThanhToan(DonHang don, DonTayRequest.ThanhToanTay tt, long soTien) {
         ThanhToan bg = new ThanhToan();

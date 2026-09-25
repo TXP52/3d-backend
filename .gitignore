@@ -3,6 +3,8 @@ target/
 data/
 # Chua mat khau database - khong duoc commit
 src/main/resources/application-supabase.properties
+# Tren may chu: file mat khau dat canh jar, Spring Boot tu doc thu muc config/
+config/
 *.log
 .idea/
 *.iml

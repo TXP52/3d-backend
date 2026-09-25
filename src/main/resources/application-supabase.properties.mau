@@ -1,0 +1,11 @@
+# ============================================================
+# MAU cau hinh Supabase — chep file nay thanh application-supabase.properties
+# roi dien thong tin that. File that KHONG duoc commit (xem .gitignore).
+#
+# Tren may chu (Render...) thi khong dung file nay, khai bang bien moi truong:
+#   SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, SPRING_DATASOURCE_PASSWORD,
+#   IN3D_AUTH_SECRET
+# ============================================================
+spring.datasource.url=jdbc:postgresql://<host>:5432/postgres
+spring.datasource.username=<user>
+spring.datasource.password=<mat-khau>

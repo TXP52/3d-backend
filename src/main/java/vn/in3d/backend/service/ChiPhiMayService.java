@@ -218,7 +218,8 @@ public class ChiPhiMayService {
      *     theo giờ in (mẫu in lâu nặng ký hơn), không phải trung bình cộng các tỉ số. Gram một cái
      *     = tổng nhựa ÷ số cái đã in — đúng cách kemChiPhiMay chia tiền nhựa ra một cái.
      *     Cần ít nhất SO_BIEN_THE_TU_TINH biến thể như vậy, ít hơn thì một mẫu lạ kéo lệch cả giá.
-     *   - Chưa đủ: định mức may_in.gram_moi_gio trong cai_dat, chưa có thì mặc định 25 g/giờ.
+     *   - Chủ shop tự đặt định mức may_in.gram_moi_gio trong cai_dat thì lấy luôn số đó, khỏi tính
+     *     trung bình; chưa đặt và chưa đủ dữ liệu thì mặc định 25 g/giờ.
      * Làm tròn 1 chữ số lẻ — đúng số trang hiện ra, để phép chia in trên trang khớp với kết quả.
      *
      * @param dsSanPham DTO sản phẩm chưa xoá (BoNhoDem.dsSanPham(true)), bienThe[] là biến thể chưa xoá
@@ -238,13 +239,14 @@ public class ChiPhiMayService {
                 soBienThe++;
             }
         }
+        // Chủ shop TỰ ĐẶT định mức thì nghe theo — gõ số vào ô mà giá không đổi thì vô lý
+        if (cp != null && cp.gramMoiGioTuCaiDat()) {
+            return new NangSuat(Math.max(0.1, motSoLe(cp.gramMoiGio())), NGUON_CAI_DAT, soBienThe);
+        }
         if (soBienThe >= SO_BIEN_THE_TU_TINH) {
             double g = motSoLe(tongGram * 60 / tongPhut);
             // Toàn mẫu siêu nhẹ in rất lâu có thể làm tròn ra 0: khi đó chia cho 0.1 chứ đừng chia cho 0
             return new NangSuat(Math.max(0.1, g), NGUON_DU_LIEU, soBienThe);
-        }
-        if (cp != null && cp.gramMoiGioTuCaiDat()) {
-            return new NangSuat(Math.max(0.1, motSoLe(cp.gramMoiGio())), NGUON_CAI_DAT, soBienThe);
         }
         return new NangSuat(MAC_DINH_GRAM_MOI_GIO, NGUON_MAC_DINH, soBienThe);
     }

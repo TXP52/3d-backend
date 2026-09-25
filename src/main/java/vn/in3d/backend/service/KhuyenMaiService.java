@@ -219,6 +219,16 @@ public class KhuyenMaiService {
         if (soDong == 0) throw loi("Mã này đã hết lượt sử dụng.");
     }
 
+    /**
+     * Trả lại MỘT lượt cho mã (đơn đổi sang mã khác lúc sửa). Không tìm thấy mã hoặc
+     * mã đang ở 0 lượt thì bỏ qua — trả lượt là dọn dẹp, không đáng để hỏng lệnh sửa đơn.
+     */
+    public void traLaiLuotTheoMa(String ma) {
+        if (ma == null || ma.isBlank()) return;
+        jdbc.update("update khuyen_mai set da_dung = greatest(0, da_dung - 1), updated_at = now() "
+                + "where upper(ma) = upper(?)", ma.trim());
+    }
+
     private ResponseStatusException loi(String thongBao) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, thongBao);
     }

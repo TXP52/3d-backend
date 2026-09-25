@@ -1,0 +1,51 @@
+# ============================================================
+# Khai báo dịch vụ cho Render. Có file này thì ở Render chỉ cần bấm
+# "New +" → "Blueprint" → chọn repo, khỏi phải điền tay từng ô.
+#
+# Những biến để sync:false là bí mật — Render sẽ HỎI bạn điền trong trang web
+# của họ, không nằm trong file này nên không bị đẩy lên GitHub.
+# ============================================================
+services:
+  - type: web
+    name: in3d-backend
+    runtime: docker
+    plan: free            # 512MB RAM, tự ngủ sau 15 phút không ai vào
+    region: singapore     # gần Việt Nam nhất trong các vùng của Render
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/suc-khoe
+    envVars:
+      # --- Database Supabase ---
+      # Lấy ở Supabase → Project Settings → Database → Connection string → URI,
+      # rồi đổi đầu "postgresql://" thành "jdbc:postgresql://" và bỏ phần user:mật khẩu
+      # ra khỏi chuỗi (khai riêng ở hai ô dưới).
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+
+      # --- Chìa khoá ký token đăng nhập ---
+      # generateValue: Render tự sinh một chuỗi ngẫu nhiên, không ai biết kể cả bạn.
+      # Đổi chuỗi này = mọi người đang đăng nhập bị đăng xuất, không mất dữ liệu gì.
+      - key: IN3D_AUTH_SECRET
+        generateValue: true
+
+      # --- Trang nào được gọi API này ---
+      # Sửa lại cho đúng địa chỉ trang của bạn, ngăn cách bởi dấu phẩy.
+      - key: IN3D_CORS_ORIGINS
+        value: https://txp52.github.io
+
+      # --- Chỗ để ảnh ---
+      # Gói free của Render KHÔNG gắn được ổ đĩa, /tmp bị xoá mỗi lần khởi động lại.
+      # Ảnh mới tải lên sẽ mất sau vài giờ. Muốn giữ được thì chuyển sang
+      # Supabase Storage hoặc lên gói trả phí để gắn đĩa.
+      - key: IN3D_THU_MUC_ANH
+        value: /tmp/anh
+
+      # --- Gmail gửi mã OTP đăng nhập quản trị ---
+      # Không khai thì mã OTP được in ra log của Render thay vì gửi email.
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
