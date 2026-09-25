@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # CẬP NHẬT BACKEND trên máy server sau khi có code mới trên GitHub.
 #
 #   .\may-chu\cap-nhat.ps1
@@ -27,7 +27,7 @@ git pull --ff-only
 
 Write-Host "Dung lai ban chay..." -ForegroundColor Cyan
 .\mvnw.cmd -B package -DskipTests
-if ($LASTEXITCODE -ne 0) { throw "Dung ban chay that bai — backend cu van con nguyen, chua bat lai." }
+if ($LASTEXITCODE -ne 0) { throw "Dung ban chay that bai. Backend cu van con nguyen, chua bat lai." }
 
 if ($dangChay) {
     Write-Host "Bat lai backend..." -ForegroundColor Cyan
@@ -41,5 +41,5 @@ if ($dangChay) {
         Write-Host '  Get-Content .\may-chu\backend.log -Tail 60'
     }
 } else {
-    Write-Host "Xong. Chua cai tu chay — chay .\may-chu\cai-tu-chay.ps1 neu muon." -ForegroundColor Yellow
+    Write-Host "Xong. Chua cai tu chay, chay .\may-chu\cai-tu-chay.ps1 neu muon." -ForegroundColor Yellow
 }

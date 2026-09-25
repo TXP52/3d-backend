@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # BẢO WINDOWS TỰ CHẠY BACKEND MỖI KHI MÁY KHỞI ĐỘNG.
 #
 # Chạy MỘT LẦN, bằng PowerShell mở với quyền Administrator:

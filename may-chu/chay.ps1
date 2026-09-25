@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # CHẠY BACKEND trên máy server.
 #
 # Dùng được cả hai kiểu:
@@ -12,6 +12,11 @@
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
+
+# PowerShell 5.1 mặc định ghi file chuyển hướng (>>) theo UTF-16, mà dòng tiêu đề
+# bên dưới lại ghi UTF-8 — một file hai kiểu mã thì mở ra chữ rời rạc từng ký tự.
+# Dòng này bắt mọi lần ghi file trong script đều dùng UTF-8.
+$PSDefaultParameterValues['Out-File:Encoding'] = 'utf8'
 
 # Thư mục repo = thư mục cha của may-chu\
 $goc = Split-Path -Parent $PSScriptRoot
@@ -49,6 +54,11 @@ function TimJava {
 # Hỏi thẳng java.exe xem nó là bản mấy. Không tin theo tên thư mục: máy có thể
 # cài nhiều bản, mà bản trong PATH thường là bản mới nhất — đúng cái không dùng được.
 function SoHieuJava($duong) {
+    # java in phiên bản ra LUỒNG LỖI chứ không phải luồng thường. Đầu script đang để
+    # $ErrorActionPreference = 'Stop' nên mỗi dòng đó bị coi là lỗi nặng và ném ra
+    # ngoài — đọc bản nào cũng thành 0. Gán lại ngay trong hàm: PowerShell tự tạo
+    # bản riêng cho hàm này, ra khỏi hàm là giá trị cũ trở lại.
+    $ErrorActionPreference = 'Continue'
     try {
         $dong = (& $duong -version 2>&1 | Out-String)
         if ($dong -match 'version "(\d+)') { return [int]$Matches[1] }
@@ -95,7 +105,15 @@ if ((Test-Path $nhatKy) -and ((Get-Item $nhatKy).Length -gt 20MB)) {
     Move-Item $nhatKy "$nhatKy.cu" -Force
 }
 
-"=== Khoi dong $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss') — java $ban: $java ===" | Out-File $nhatKy -Append -Encoding utf8
+# Chuoi nay CHI dung ky tu ASCII. PowerShell 5.1 doc file .ps1 theo bang ma ANSI
+# khi file khong co dau BOM, nen dau gach dai hay chu co dau nam trong chuoi se
+# vo thanh ky tu nhay va lam dut cau lenh. Dung ${ban} chu khong phai $ban: vi
+# dau hai cham ngay sau ten bien bi hieu la ten pham vi (kieu $env:).
+"=== Khoi dong $(Get-Date -Format 'dd/MM/yyyy HH:mm:ss') - java ${ban} tai $java ===" | Out-File $nhatKy -Append -Encoding utf8
+
+# Từ đây trở đi đừng để 'Stop' nữa: java viết cảnh báo ra luồng lỗi là chuyện
+# bình thường, mà 'Stop' thì coi mỗi dòng đó là lỗi nặng và giết luôn script.
+$ErrorActionPreference = 'Continue'
 
 # Chạy thẳng (không Start-Process): Task Scheduler coi tiến trình này là tác vụ,
 # tắt tác vụ là tắt backend, khỏi phải đi tìm số hiệu tiến trình.
