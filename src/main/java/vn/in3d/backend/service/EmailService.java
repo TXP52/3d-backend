@@ -42,9 +42,9 @@ public class EmailService {
         try {
             MimeMessage mime = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(mime, "UTF-8");
-            helper.setFrom(nguoiGui, "IN3D Store");
+            helper.setFrom(nguoiGui, "BEDEMAKER");
             helper.setTo(email);
-            helper.setSubject("Mã đăng nhập quản trị IN3D Store: " + ma);
+            helper.setSubject("Mã đăng nhập quản trị BEDEMAKER: " + ma);
             helper.setText(taoNoiDung(ma, phutHieuLuc), true);
             mailSender.send(mime);
             System.out.println("[IN3D] Đã gửi mã OTP tới " + email);
@@ -58,7 +58,7 @@ public class EmailService {
     private String taoNoiDung(String ma, int phut) {
         return "<div style=\"font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:28px;"
                 + "border:1px solid #e4e6e9;border-radius:14px\">"
-                + "<h2 style=\"margin:0 0 6px 0;color:#161616\">IN3D Store</h2>"
+                + "<h2 style=\"margin:0 0 6px 0;color:#161616\">BEDEMAKER</h2>"
                 + "<p style=\"color:#6b7280;margin:0 0 22px 0\">Hệ thống quản trị bán hàng máy in 3D</p>"
                 + "<p style=\"color:#1c2024\">Mã xác thực đăng nhập trang quản trị của bạn là:</p>"
                 + "<div style=\"font-size:34px;font-weight:700;letter-spacing:8px;color:#059669;"
