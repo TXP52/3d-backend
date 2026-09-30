@@ -40,13 +40,30 @@ import java.util.List;
 @Configuration
 public class DataSeeder {
 
-    private static final String ADMIN_MAT_KHAU = "txP12345678@";
+    /**
+     * Mật khẩu đặt cho tài khoản quản trị lúc TẠO MỚI, khi chưa khai gì khác.
+     * Chỉ dùng đúng một lần lúc bảng còn trống — đổi ngay sau lần đăng nhập đầu.
+     *
+     * Chuỗi này nằm trong mã nguồn công khai nên ai cũng đọc được, vì vậy nó
+     * KHÔNG được dùng để đặt lại mật khẩu của tài khoản đã có (xem napAdmin).
+     */
+    private static final String MAT_KHAU_MAC_DINH = "doi-mat-khau-ngay";
 
     /** Email quản trị DUY NHẤT — đổi bằng in3d.admin.email trong application.properties. */
     private final String adminEmail;
 
-    public DataSeeder(@Value("${in3d.admin.email:txp5201aquarius@gmail.com}") String adminEmail) {
+    /**
+     * Đặt lại mật khẩu quản trị khi quên: khai biến môi trường IN3D_DAT_LAI_MAT_KHAU
+     * bằng mật khẩu mới, khởi động lại backend một lần, rồi XOÁ biến đó đi và khởi
+     * động lại lần nữa. Để nguyên biến thì mỗi lần khởi động lại đặt lại một lần,
+     * tức là đổi mật khẩu ở trang quản trị bao nhiêu cũng vô ích.
+     */
+    private final String datLaiMatKhau;
+
+    public DataSeeder(@Value("${in3d.admin.email:txp5201aquarius@gmail.com}") String adminEmail,
+                      @Value("${in3d.dat-lai-mat-khau:}") String datLaiMatKhau) {
         this.adminEmail = adminEmail.trim().toLowerCase();
+        this.datLaiMatKhau = datLaiMatKhau == null ? "" : datLaiMatKhau.trim();
     }
 
     @Bean
@@ -159,6 +176,11 @@ public class DataSeeder {
      *
      * @return có ghi gì vào bảng nguoi_dung không (để nơi gọi nạp lại bộ nhớ đệm)
      */
+    /** Mật khẩu dùng lúc tạo tài khoản: ưu tiên chuỗi chủ shop khai, không có thì chuỗi tạm. */
+    private String matKhauLucTao() {
+        return datLaiMatKhau.isEmpty() ? MAT_KHAU_MAC_DINH : datLaiMatKhau;
+    }
+
     private boolean napAdmin(NguoiDungRepository repo) {
         if ("false".equalsIgnoreCase(System.getenv("IN3D_TU_TAO_ADMIN"))) return false;
 
@@ -169,10 +191,13 @@ public class DataSeeder {
             NguoiDung admin = new NguoiDung();
             admin.setHoTen("Trương Xuân Phương");
             admin.setEmail(adminEmail);
-            admin.setMatKhauHash(maHoa.encode(ADMIN_MAT_KHAU));
+            admin.setMatKhauHash(maHoa.encode(matKhauLucTao()));
             admin.setVaiTro("admin");
             repo.save(admin);
-            System.out.println("[IN3D] Đã tạo tài khoản quản trị: " + adminEmail);
+            System.out.println("[IN3D] Đã tạo tài khoản quản trị: " + adminEmail
+                    + (datLaiMatKhau.isEmpty()
+                        ? " — mật khẩu tạm '" + MAT_KHAU_MAC_DINH + "', đổi ngay sau khi đăng nhập!"
+                        : " (dùng mật khẩu khai ở IN3D_DAT_LAI_MAT_KHAU)"));
             chiMotAdmin(repo);
             return true;
         }
@@ -180,10 +205,18 @@ public class DataSeeder {
 
         NguoiDung nd = hienCo.get();
         boolean doiVaiTro = !"admin".equals(nd.getVaiTro());
-        boolean doiMatKhau = !maHoa.matches(ADMIN_MAT_KHAU, nd.getMatKhauHash());
+
+        /* Mật khẩu của tài khoản ĐÃ CÓ thì để yên.
+           Bản cũ so với một chuỗi viết cứng trong mã nguồn, khác là ghi đè — nghĩa là
+           chủ shop đổi mật khẩu ở trang quản trị xong, khởi động lại backend là mất,
+           quay về đúng chuỗi mà ai đọc mã nguồn trên GitHub cũng biết.
+           Quên mật khẩu thì khai IN3D_DAT_LAI_MAT_KHAU, đó là lối vào duy nhất. */
+        boolean doiMatKhau = !datLaiMatKhau.isEmpty()
+                && !maHoa.matches(datLaiMatKhau, nd.getMatKhauHash());
+
         if (doiVaiTro || doiMatKhau) {
             nd.setVaiTro("admin");
-            nd.setMatKhauHash(maHoa.encode(ADMIN_MAT_KHAU));
+            if (doiMatKhau) nd.setMatKhauHash(maHoa.encode(datLaiMatKhau));
             repo.save(nd);
             System.out.println("[IN3D] Đã cập nhật tài khoản quản trị " + adminEmail
                     + (doiVaiTro ? " (nâng quyền admin)" : "") + (doiMatKhau ? " (đặt lại mật khẩu)" : ""));

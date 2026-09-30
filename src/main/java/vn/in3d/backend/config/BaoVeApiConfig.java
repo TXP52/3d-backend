@@ -50,7 +50,16 @@ public class BaoVeApiConfig implements WebMvcConfigurer {
      * Đường GHI mở cho khách chưa đăng nhập. Mỗi dòng phải có lý do rõ ràng.
      */
     private static final List<String> GHI_MO = List.of(
-            "/api/auth/**",                  // đăng ký, đăng nhập, gửi + xác thực OTP
+            // Khai từng đường một chứ KHÔNG dùng /api/auth/** : mẫu có hai sao đó mở
+            // luôn cả những đường thêm sau này, ví dụ /api/auth/doi-mat-khau.
+            "/api/auth/dang-ky",             // khách tự đăng ký ở website bán hàng
+            "/api/auth/dang-nhap",           // khách đăng nhập
+            "/api/auth/admin/dang-nhap",     // bước 1 đăng nhập quản trị: gửi mã OTP
+            "/api/auth/admin/xac-thuc-otp",  // bước 2: nhập mã OTP, nhận token
+            // Đổi mật khẩu CỦA CHÍNH MÌNH: không đòi vai trò admin, vì khách tự đăng ký
+            // ở website cũng phải đổi được mật khẩu của họ. Không phải chỗ hở: hàm xử lý
+            // tự đọc token (thiếu là 401) rồi bắt gõ đúng mật khẩu hiện tại mới cho đổi.
+            "/api/auth/doi-mat-khau",
             "/api/don-hang",                 // khách đặt hàng ở website (CHỈ đúng đường này,
                                              // /api/don-hang/{id}/... vẫn phải là admin)
             "/api/gio-hang/bao-gia",         // tính tiền giỏ hàng trước khi đặt

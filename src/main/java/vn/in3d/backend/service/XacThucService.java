@@ -178,6 +178,31 @@ public class XacThucService {
         );
     }
 
+    /**
+     * Đổi mật khẩu của chính người đang đăng nhập.
+     *
+     * Bắt nhập lại mật khẩu hiện tại: token nằm trong bộ nhớ trình duyệt, ai mượn
+     * được máy lúc đang mở sẵn trang quản trị cũng đổi được nếu không hỏi lại.
+     *
+     * Ghi bằng một câu UPDATE thay vì repo.save: bản ghi lấy từ bộ nhớ đệm không
+     * nằm trong transaction nào, save() sẽ ghi đè cả những cột khác theo bản cũ.
+     */
+    public void doiMatKhau(NguoiDung nd, String matKhauCu, String matKhauMoi) {
+        String cu = matKhauCu == null ? "" : matKhauCu;
+        String moi = matKhauMoi == null ? "" : matKhauMoi.trim();
+
+        if (nd.getMatKhauHash() == null || !maHoa.matches(cu, nd.getMatKhauHash())) {
+            loi400("Mật khẩu hiện tại không đúng.");
+        }
+        if (moi.length() < 8) loi400("Mật khẩu mới phải có ít nhất 8 ký tự.");
+        if (moi.equals(cu)) loi400("Mật khẩu mới phải khác mật khẩu đang dùng.");
+
+        if (jdbc.update("update nguoi_dung set mat_khau_hash = ?, updated_at = now() where id = ?",
+                maHoa.encode(moi), nd.getId()) == 0) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Không tìm thấy tài khoản.");
+        }
+    }
+
     private NguoiDung kiemTraMatKhau(String email, String matKhau) {
         NguoiDung nd = nguoiDungRepo.findByEmailIgnoreCase(email == null ? "" : email.trim())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Email hoặc mật khẩu không đúng"));

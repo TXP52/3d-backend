@@ -54,6 +54,19 @@ public class XacThucController {
         return xacThuc.xacThucOtp(body.get("email"), body.get("ma"));
     }
 
+    /**
+     * Đổi mật khẩu của chính mình. Phải kèm token VÀ mật khẩu hiện tại.
+     * Đổi xong token cũ vẫn dùng được tới khi hết hạn — không ai bị văng ra giữa chừng.
+     */
+    @PutMapping("/auth/doi-mat-khau")
+    public Map<String, Object> doiMatKhau(@RequestHeader(value = "Authorization", required = false) String authorization,
+                                          @RequestBody Map<String, String> body) {
+        NguoiDung nd = xacThuc.docToken(authorization);
+        xacThuc.doiMatKhau(nd, body.get("matKhauCu"), body.get("matKhauMoi"));
+        boNho.xoaVaNapLai(BoNhoDem.ND);
+        return Map.of("ok", true, "thongBao", "Đã đổi mật khẩu.");
+    }
+
     /** Thông tin người dùng của token hiện tại (header: Authorization: Bearer <token>). */
     @GetMapping("/auth/toi")
     public NguoiDung toi(@RequestHeader(value = "Authorization", required = false) String authorization) {
